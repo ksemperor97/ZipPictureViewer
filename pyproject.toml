@@ -16,3 +16,6 @@ dev = [
 
 [project.scripts]
 zip-picture-viewer = "zippictureviewer.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["zippictureviewer*"]
