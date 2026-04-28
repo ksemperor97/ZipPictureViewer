@@ -6,6 +6,7 @@ cd "$ROOT_DIR"
 
 export DYLD_LIBRARY_PATH="/opt/homebrew/opt/expat/lib:${DYLD_LIBRARY_PATH:-}"
 
+python scripts/generate_app_icon.py
 python -m PyInstaller --noconfirm --clean ZipPictureViewer.spec
 
 APP_DIR="dist/ZipPictureViewer.app"

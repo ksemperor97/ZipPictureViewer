@@ -104,7 +104,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='ZipPictureViewer.app',
-    icon=None,
+    icon='assets/ZipPictureViewer.icns',
     bundle_identifier='com.ksemperor97.ZipPictureViewer',
     info_plist={
         'CFBundleDisplayName': 'ZipPictureViewer',
