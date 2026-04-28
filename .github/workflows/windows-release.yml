@@ -1,0 +1,52 @@
+name: Windows Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "GitHub release tag to upload the Windows zip to"
+        required: true
+        default: "v1.0.0"
+      upload_to_release:
+        description: "Upload zip to the release"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Build Windows app
+        shell: pwsh
+        run: scripts/build_windows_app.ps1
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZipPictureViewer-windows-x64
+          path: dist/ZipPictureViewer-v1.0.0-windows-x64.zip
+
+      - name: Upload release asset
+        if: ${{ inputs.upload_to_release }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.tag_name }}" dist/ZipPictureViewer-v1.0.0-windows-x64.zip --clobber

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import subprocess
 from pathlib import Path
 
@@ -21,6 +22,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 ASSETS_DIR = ROOT_DIR / "assets"
 ICONSET_DIR = ASSETS_DIR / "ZipPictureViewer.iconset"
 ICNS_PATH = ASSETS_DIR / "ZipPictureViewer.icns"
+ICO_PATH = ASSETS_DIR / "ZipPictureViewer.ico"
 
 
 ICON_SIZES = {
@@ -42,9 +44,18 @@ def main() -> None:
     app = QApplication([])
 
     ASSETS_DIR.mkdir(exist_ok=True)
-    ICONSET_DIR.mkdir(exist_ok=True)
 
     large = draw_icon(1024)
+    write_ico(large)
+    if platform.system() == "Darwin":
+        write_icns(large)
+
+    print(ICNS_PATH if ICNS_PATH.exists() else ICO_PATH)
+    app.quit()
+
+
+def write_icns(large: QImage) -> None:
+    ICONSET_DIR.mkdir(exist_ok=True)
     for filename, size in ICON_SIZES.items():
         scaled = large.scaled(
             size,
@@ -55,8 +66,17 @@ def main() -> None:
         scaled.save(str(ICONSET_DIR / filename))
 
     subprocess.run(["iconutil", "-c", "icns", str(ICONSET_DIR), "-o", str(ICNS_PATH)], check=True)
-    print(ICNS_PATH)
-    app.quit()
+
+
+def write_ico(large: QImage) -> None:
+    icon = large.scaled(
+        256,
+        256,
+        Qt.AspectRatioMode.IgnoreAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+    if not icon.save(str(ICO_PATH), "ICO"):
+        raise RuntimeError(f"Failed to write Windows icon: {ICO_PATH}")
 
 
 def draw_icon(size: int) -> QImage:

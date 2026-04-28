@@ -1,6 +1,6 @@
 [project]
 name = "zip-picture-viewer"
-version = "0.1.0"
+version = "1.0.0"
 description = "A desktop image viewer that treats images inside zip archives as one continuous stream."
 readme = "README.md"
 requires-python = ">=3.10"

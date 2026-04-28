@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -8,7 +10,23 @@ from typing import Any
 from .models import ImageEntry
 
 
-APP_SUPPORT_DIR = Path.home() / "Library" / "Application Support" / "ZipPictureViewer"
+def app_support_dir() -> Path:
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "ZipPictureViewer"
+
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "ZipPictureViewer"
+        return Path.home() / "AppData" / "Roaming" / "ZipPictureViewer"
+
+    config_home = os.environ.get("XDG_CONFIG_HOME")
+    if config_home:
+        return Path(config_home) / "ZipPictureViewer"
+    return Path.home() / ".config" / "ZipPictureViewer"
+
+
+APP_SUPPORT_DIR = app_support_dir()
 SESSION_FILE = APP_SUPPORT_DIR / "session.json"
 
 
