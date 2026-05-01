@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QEvent, QSize, Qt, QTimer
-from PySide6.QtGui import QKeySequence, QPixmap, QShortcut
+from PySide6.QtGui import QKeySequence, QMovie, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -21,7 +21,9 @@ from PySide6.QtWidgets import (
 from .archive_scanner import build_image_index
 from .folder_navigation import child_folders, parent_folder, sibling_folder
 from .image_cache import PixmapCache
+from .image_loader import MovieResource, load_movie
 from .mac_presentation import set_menu_bar_auto_hidden
+from .models import ImageEntry
 from .session_store import SessionStore
 from .viewer_state import ViewerState
 
@@ -140,6 +142,7 @@ class MainWindow(QMainWindow):
 
         self.state = ViewerState()
         self.current_pixmap: QPixmap | None = None
+        self.current_movie: MovieResource | None = None
         self.current_root: Path | None = None
         self.image_cache = PixmapCache()
         self.session_store = SessionStore()
@@ -193,7 +196,9 @@ class MainWindow(QMainWindow):
         self.state.set_entries(entries, restored_index)
 
         if not entries:
+            self._stop_current_movie()
             self.current_pixmap = None
+            self.image_label.clear()
             self.image_label.setText("이미지를 찾지 못했습니다")
             self.file_label.setText(str(root))
             self.status_label.setText("0 / 0")
@@ -223,9 +228,13 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            self.current_pixmap = self.image_cache.get_or_load(entry)
+            if entry.is_animated:
+                self._show_current_movie(entry)
+            else:
+                self._show_current_pixmap(entry)
         except Exception as exc:
             QMessageBox.warning(self, "이미지 로드 실패", f"{entry.member_name}\n\n{exc}")
+            self._stop_current_movie()
             self.current_pixmap = None
             return
 
@@ -236,6 +245,17 @@ class MainWindow(QMainWindow):
         self._save_position()
         QApplication.processEvents()
         self.image_cache.preload_around(self.state.entries, self.state.current_index)
+
+    def _show_current_pixmap(self, entry: ImageEntry) -> None:
+        self._stop_current_movie()
+        self.current_pixmap = self.image_cache.get_or_load(entry)
+        self.image_label.clear()
+
+    def _show_current_movie(self, entry: ImageEntry) -> None:
+        self._stop_current_movie()
+        self.current_pixmap = None
+        self.current_movie = load_movie(entry)
+        self._render_current_movie(start=True)
 
     def show_next_image(self) -> None:
         if self.state.move_next():
@@ -351,6 +371,10 @@ class MainWindow(QMainWindow):
             self.fullscreen_button.setText("전체화면")
 
     def _render_current_pixmap(self) -> None:
+        if self.current_movie is not None:
+            self._render_current_movie(start=False)
+            return
+
         if self.current_pixmap is None:
             return
 
@@ -361,6 +385,39 @@ class MainWindow(QMainWindow):
             Qt.TransformationMode.SmoothTransformation,
         )
         self.image_label.setPixmap(scaled)
+
+    def _render_current_movie(self, start: bool) -> None:
+        if self.current_movie is None:
+            return
+
+        movie = self.current_movie.movie
+        if not movie.isValid():
+            return
+
+        if movie.frameRect().isEmpty():
+            movie.jumpToFrame(0)
+
+        source_size = movie.frameRect().size()
+        if source_size.isEmpty():
+            source_size = movie.currentPixmap().size()
+        if not source_size.isEmpty():
+            scaled_size = source_size.scaled(
+                self.image_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+            )
+            movie.setScaledSize(scaled_size)
+
+        self.image_label.setMovie(movie)
+        if start and movie.state() != QMovie.MovieState.Running:
+            movie.start()
+
+    def _stop_current_movie(self) -> None:
+        if self.current_movie is None:
+            return
+
+        self.current_movie.movie.stop()
+        self.current_movie = None
+        self.image_label.clear()
 
     def _update_navigation(self) -> None:
         has_entries = self.state.has_entries

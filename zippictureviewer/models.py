@@ -16,3 +16,7 @@ class ImageEntry:
     @property
     def image_label(self) -> str:
         return Path(self.member_name).name
+
+    @property
+    def is_animated(self) -> bool:
+        return Path(self.member_name).suffix.lower() == ".gif"

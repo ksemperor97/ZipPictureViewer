@@ -41,6 +41,8 @@ class PixmapCache:
         stop = min(len(entries), current_index + after + 1)
         for index in range(start, stop):
             entry = entries[index]
+            if entry.is_animated:
+                continue
             if entry not in self._items:
                 try:
                     self.get_or_load(entry)
