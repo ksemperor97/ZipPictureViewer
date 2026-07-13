@@ -1,5 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+from pathlib import Path
+
+from scripts.check_release_version import read_project_version
+
+
+PROJECT_ROOT = Path(SPECPATH).resolve()
+APP_VERSION = read_project_version(PROJECT_ROOT)
+TARGET_MACOS_VERSION = os.environ.get('MACOSX_DEPLOYMENT_TARGET', '13.0')
 
 a = Analysis(
     ['zippictureviewer_launcher.py'],
@@ -108,8 +117,9 @@ app = BUNDLE(
     bundle_identifier='com.ksemperor97.ZipPictureViewer',
     info_plist={
         'CFBundleDisplayName': 'ZipPictureViewer',
-        'CFBundleShortVersionString': '1.0.0',
-        'CFBundleVersion': '1.0.0',
+        'CFBundleShortVersionString': APP_VERSION,
+        'CFBundleVersion': APP_VERSION,
+        'LSMinimumSystemVersion': TARGET_MACOS_VERSION,
         'NSHighResolutionCapable': True,
     },
 )

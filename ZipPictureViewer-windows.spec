@@ -1,5 +1,44 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
+from PyInstaller.utils.win32.versioninfo import (
+    FixedFileInfo,
+    StringFileInfo,
+    StringStruct,
+    StringTable,
+    VSVersionInfo,
+    VarFileInfo,
+    VarStruct,
+)
+from scripts.check_release_version import read_project_version, windows_version_tuple
+
+
+PROJECT_ROOT = Path(SPECPATH).resolve()
+APP_VERSION = read_project_version(PROJECT_ROOT)
+WINDOWS_VERSION = windows_version_tuple(APP_VERSION)
+VERSION_INFO = VSVersionInfo(
+    ffi=FixedFileInfo(filevers=WINDOWS_VERSION, prodvers=WINDOWS_VERSION),
+    kids=[
+        StringFileInfo(
+            [
+                StringTable(
+                    '040904B0',
+                    [
+                        StringStruct('CompanyName', 'ksemperor97'),
+                        StringStruct('FileDescription', 'Zip Picture Viewer'),
+                        StringStruct('FileVersion', APP_VERSION),
+                        StringStruct('InternalName', 'ZipPictureViewer'),
+                        StringStruct('OriginalFilename', 'ZipPictureViewer.exe'),
+                        StringStruct('ProductName', 'Zip Picture Viewer'),
+                        StringStruct('ProductVersion', APP_VERSION),
+                    ],
+                )
+            ]
+        ),
+        VarFileInfo([VarStruct('Translation', [1033, 1200])]),
+    ],
+)
 
 a = Analysis(
     ['zippictureviewer_launcher.py'],
@@ -93,6 +132,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='assets/ZipPictureViewer.ico',
+    version=VERSION_INFO,
 )
 coll = COLLECT(
     exe,

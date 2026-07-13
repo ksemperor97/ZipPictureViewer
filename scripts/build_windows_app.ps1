@@ -3,7 +3,15 @@ $ErrorActionPreference = "Stop"
 $RootDir = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RootDir
 
-$Version = "1.0.0"
+$VersionOutput = & python scripts/check_release_version.py
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not determine the project version"
+}
+$Version = ([string]$VersionOutput).Trim()
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    throw "Project version is empty"
+}
+
 $AppDir = Join-Path $RootDir "dist/ZipPictureViewer"
 $Archive = Join-Path $RootDir "dist/ZipPictureViewer-v$Version-windows-x64.zip"
 
@@ -24,6 +32,7 @@ $RemovePaths = @(
     "$QtDir/plugins/qmltooling",
     "$QtDir/plugins/sqldrivers",
     "$QtDir/plugins/platforms/qminimal.dll",
+    "$QtDir/plugins/platforms/qoffscreen.dll",
     "$QtDir/plugins/imageformats/qicns.dll",
     "$QtDir/plugins/imageformats/qico.dll",
     "$QtDir/plugins/imageformats/qpdf.dll",
@@ -34,13 +43,37 @@ $RemovePaths = @(
 )
 
 foreach ($Path in $RemovePaths) {
-    Remove-Item $Path -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+$ValidatorArguments = @(
+    "scripts/check_windows_bundle.py",
+    "--app-dir", $AppDir
+)
+if ($env:ZIP_PICTURE_VIEWER_REQUIRE_SIGNATURE -eq "1") {
+    $ValidatorArguments += "--require-authenticode"
+}
+& python @ValidatorArguments
+if ($LASTEXITCODE -ne 0) {
+    throw "Windows bundle validation failed"
+}
+
+if ($env:ZIP_PICTURE_VIEWER_RUN_SMOKE_TEST -eq "1") {
+    & (Join-Path $AppDir "ZipPictureViewer.exe") --smoke-test
+    if ($LASTEXITCODE -ne 0) {
+        throw "Application smoke test failed"
+    }
 }
 
 if (Test-Path $Archive) {
-    Remove-Item $Archive -Force
+    Remove-Item -LiteralPath $Archive -Force
 }
 Compress-Archive -Path $AppDir -DestinationPath $Archive -Force
+
+& python scripts/check_windows_bundle.py --app-dir $AppDir --archive $Archive
+if ($LASTEXITCODE -ne 0) {
+    throw "Windows archive validation failed"
+}
 
 Write-Host "Built $AppDir"
 Write-Host "Packed $Archive"
