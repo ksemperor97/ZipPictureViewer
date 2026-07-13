@@ -1,6 +1,6 @@
 [project]
 name = "zip-picture-viewer"
-version = "1.0.0"
+version = "1.1.0"
 description = "A desktop image viewer that treats images inside zip archives as one continuous stream."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,6 +12,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pyinstaller>=6.20",
+    "pytest>=8.3",
+    "pytest-qt>=4.4",
+    "ruff>=0.9",
 ]
 
 [project.scripts]
@@ -19,3 +22,14 @@ zip-picture-viewer = "zippictureviewer.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["zippictureviewer*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+qt_api = "pyside6"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B"]
