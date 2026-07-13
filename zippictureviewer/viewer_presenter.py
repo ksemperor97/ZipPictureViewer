@@ -4,7 +4,7 @@ from PySide6.QtCore import QObject, QSize, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QWidget
 
-from .archive_access import ArchiveAccess
+from .archive_access import ArchiveAccess, ArchiveAccessDecision
 from .decode_worker import AsyncDecoder, DecodedPayload
 from .image_cache import PixmapCache
 from .image_loader import (
@@ -60,11 +60,11 @@ class ImagePresenter(QObject):
         )
         self.image_view.fit_requested.connect(self._fit_requested)
         self.image_view.viewport_resized.connect(self._viewport_resized)
-        self.image_view.zoom_resolution_requested.connect(
-            self._zoom_resolution_requested
-        )
+        self.image_view.zoom_changed.connect(self._zoom_changed)
 
     def show_current(self) -> None:
+        if self._closing:
+            return
         token = self.controller.begin_display()
         if token is None:
             return
@@ -86,7 +86,9 @@ class ImagePresenter(QObject):
                 self._show_decoded_image(token, cached)
                 return
 
-        access = self.archive_access.request(token.entry, self.dialog_parent)
+        access = self._validated_archive_access(token)
+        if access is None:
+            return
         if access.allowed:
             self.decoder.request(
                 token,
@@ -99,24 +101,41 @@ class ImagePresenter(QObject):
     def request_full_resolution(self) -> None:
         entry = self.state.current_entry
         if (
-            entry is None
+            self._closing
+            or entry is None
             or entry.is_animated
             or self._full_resolution_current == entry
         ):
             return
+        self._resize_timer.stop()
+        self._zoom_timer.stop()
         token = self.controller.begin_display()
         if token is None:
             return
         self.decoder.clear_queued()
         self._preload_pending.clear()
+        access = self._validated_archive_access(token)
+        if access is None:
+            return
+        if not access.allowed:
+            if access.error_message is not None:
+                self._decode_failed(
+                    token,
+                    access.error_message,
+                    False,
+                    True,
+                )
+            return
         self.status_changed.emit("원본 해상도 불러오는 중…")
         self.decoder.request(
             token,
-            password=self.archive_access.cached_password(entry),
+            password=access.password,
         )
 
     def reset_source(self) -> None:
         self.decoder.clear_queued()
+        self._resize_timer.stop()
+        self._zoom_timer.stop()
         self.stop_movie()
         self.current_pixmap = None
         self._full_resolution_current = None
@@ -126,8 +145,14 @@ class ImagePresenter(QObject):
         self.errors_changed.emit()
 
     def begin_shutdown(self) -> None:
+        if self._closing:
+            return
         self._closing = True
+        self._resize_timer.stop()
+        self._zoom_timer.stop()
+        self.controller.invalidate_display()
         self.decoder.clear_queued()
+        self._preload_pending.clear()
         self.stop_movie()
 
     def wait_for_done(self, timeout_ms: int = 0) -> bool:
@@ -196,6 +221,7 @@ class ImagePresenter(QObject):
         preload: bool,
         full_resolution: bool,
         preserve_existing: bool = False,
+        invalid_password: bool = False,
     ) -> None:
         if self._closing:
             return
@@ -204,6 +230,9 @@ class ImagePresenter(QObject):
             return
         if not self.controller.is_current_display(token):
             return
+        if invalid_password:
+            self.archive_access.invalidate_password(token.entry)
+            message = f"{message}\n다시 열면 ZIP 암호를 재입력할 수 있습니다."
         if (full_resolution or preserve_existing) and self.current_pixmap is not None:
             self._full_resolution_current = None
             resolution_kind = "원본" if full_resolution else "확대"
@@ -215,9 +244,6 @@ class ImagePresenter(QObject):
             )
             self.errors_changed.emit()
             return
-        if token.entry.encryption == "zipcrypto":
-            self.archive_access.invalidate_password(token.entry)
-            message = f"{message}\n다시 열면 ZIP 암호를 재입력할 수 있습니다."
         self._show_decode_error(token, message)
 
     def _accept_preload(
@@ -266,6 +292,8 @@ class ImagePresenter(QObject):
         self._schedule_preload(token)
 
     def _show_decode_error(self, token: DisplayToken, message: str) -> None:
+        if self._closing or not self.controller.is_current_display(token):
+            return
         self.stop_movie()
         self.current_pixmap = None
         self.errors[token.entry] = message
@@ -305,6 +333,9 @@ class ImagePresenter(QObject):
 
     def _fit_requested(self) -> None:
         self._zoom_timer.stop()
+        self._resize_timer.stop()
+        if self._closing or self.current_pixmap is None:
+            return
         self.controller.invalidate_display()
         self.decoder.clear_queued()
         self._preload_pending.clear()
@@ -314,15 +345,22 @@ class ImagePresenter(QObject):
         if self.image_view.fit_mode:
             self._resize_timer.start()
 
-    def _zoom_resolution_requested(self) -> None:
+    def _zoom_changed(self, request_higher_resolution: bool) -> None:
         entry = self.state.current_entry
         if (
-            entry is None
+            self._closing
+            or entry is None
             or entry.is_animated
             or self._full_resolution_current == entry
         ):
             return
-        self._zoom_timer.start()
+        self._resize_timer.stop()
+        self._zoom_timer.stop()
+        self.controller.invalidate_display()
+        self.decoder.clear_queued()
+        self._preload_pending.clear()
+        if request_higher_resolution:
+            self._zoom_timer.start()
 
     def _request_zoom_resolution(self) -> None:
         entry = self.state.current_entry
@@ -380,6 +418,15 @@ class ImagePresenter(QObject):
     def _clear_error(self, entry: ImageEntry) -> None:
         if self.errors.pop(entry, None) is not None:
             self.errors_changed.emit()
+
+    def _validated_archive_access(
+        self,
+        token: DisplayToken,
+    ) -> ArchiveAccessDecision | None:
+        access = self.archive_access.request(token.entry, self.dialog_parent)
+        if self._closing or not self.controller.is_current_display(token):
+            return None
+        return access
 
     def _fit_decode_size(self) -> QSize:
         viewport = self.image_view.viewport()

@@ -37,12 +37,20 @@ def test_async_decoder_reports_failure_without_raising(tmp_path: Path, qtbot) ->
     with qtbot.waitSignal(decoder.failed, timeout=3000) as signal:
         decoder.request(token)
 
-    returned_token, message, preload, full_resolution, preserve_zoom = signal.args
+    (
+        returned_token,
+        message,
+        preload,
+        full_resolution,
+        preserve_zoom,
+        invalid_password,
+    ) = signal.args
     assert returned_token == token
     assert "missing.png" in message or "No such file" in message
     assert not preload
     assert full_resolution
     assert not preserve_zoom
+    assert not invalid_password
 
 
 def test_async_decoder_separates_fit_preview_from_full_resolution(

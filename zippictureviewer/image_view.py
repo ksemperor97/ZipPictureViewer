@@ -23,6 +23,7 @@ class ImageView(QGraphicsView):
     fit_requested = Signal()
     viewport_resized = Signal(QSize)
     zoom_resolution_requested = Signal()
+    zoom_changed = Signal(bool)
 
     def __init__(self) -> None:
         scene = QGraphicsScene()
@@ -236,6 +237,7 @@ class ImageView(QGraphicsView):
         self.scale(factor, factor)
         self._fit_mode = False
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.zoom_changed.emit(factor > 1.0)
         if factor > 1.0:
             self.zoom_resolution_requested.emit()
 
