@@ -7,6 +7,7 @@ from PySide6.QtGui import QImage
 
 from .image_loader import (
     InvalidPasswordError,
+    ResourceLimitError,
     SourceChangedError,
     current_source_revision,
     load_image,
@@ -27,7 +28,7 @@ class DecodedPayload:
 
 class DecodeSignals(QObject):
     ready = Signal(object, object, bool)
-    failed = Signal(object, str, bool, bool, bool, bool)
+    failed = Signal(object, str, bool, bool, bool, bool, bool)
 
 
 class DecodeTask(QRunnable):
@@ -62,6 +63,7 @@ class DecodeTask(QRunnable):
                 full_resolution,
                 self.preserve_zoom,
                 isinstance(error, InvalidPasswordError),
+                isinstance(error, ResourceLimitError),
             )
             return
         self.signals.ready.emit(self.token, payload, self.preload)
@@ -102,7 +104,7 @@ class DecodeTask(QRunnable):
 
 class AsyncDecoder(QObject):
     ready = Signal(object, object, bool)
-    failed = Signal(object, str, bool, bool, bool, bool)
+    failed = Signal(object, str, bool, bool, bool, bool, bool)
 
     def __init__(self, max_threads: int = 2, parent: QObject | None = None) -> None:
         super().__init__(parent)

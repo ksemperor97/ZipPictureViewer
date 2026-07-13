@@ -7,16 +7,17 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QMainWindow,
-    QMessageBox,
 )
 
 from .folder_context import ARCHIVE_EXTENSIONS, FolderContext
 from .folder_navigation import sibling_context
 from .image_view import ImageView
+from .issue_dialog import IssueDialog
 from .mac_presentation import set_menu_bar_auto_hidden
 from .models import ImageEntry, ScanIssue, ScanResult
 from .position_saver import PositionSaver
 from .session_store import SessionStore
+from .shortcut_help_dialog import ShortcutHelpDialog
 from .source_loader import SourceLoader
 from .viewer_controller import ViewerController
 from .viewer_controls import ViewerControls, ViewerInfoPanel
@@ -57,6 +58,9 @@ class MainWindow(QMainWindow):
         self.image_label = self.image_view
         self.controls_panel = ViewerControls()
         self.info_panel = ViewerInfoPanel()
+        self.issue_dialog = IssueDialog(self)
+        self.issue_dialog.retry_requested.connect(self.refresh_source)
+        self.shortcut_help_dialog = ShortcutHelpDialog(self)
         for name in self.controls_panel.button_names:
             setattr(self, name, getattr(self.controls_panel, name))
         self.status_label = self.controls_panel.status_label
@@ -228,11 +232,15 @@ class MainWindow(QMainWindow):
         messages = self._issue_messages()
         if not messages:
             return
-        QMessageBox.information(
-            self,
-            "읽지 못한 항목",
-            "\n\n".join(messages[:30]),
-        )
+        self.issue_dialog.set_messages(messages)
+        self.issue_dialog.show()
+        self.issue_dialog.raise_()
+        self.issue_dialog.activateWindow()
+
+    def show_shortcut_help(self) -> None:
+        self.shortcut_help_dialog.show()
+        self.shortcut_help_dialog.raise_()
+        self.shortcut_help_dialog.activateWindow()
 
     def toggle_fullscreen(self) -> None:
         if self.isFullScreen():
@@ -305,11 +313,12 @@ class MainWindow(QMainWindow):
         self.zoom_out_button.clicked.connect(self.image_view.zoom_out)
         self.zoom_in_button.clicked.connect(self.image_view.zoom_in)
         self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
+        self.help_button.clicked.connect(self.show_shortcut_help)
         self.minimize_button.clicked.connect(self.showMinimized)
         self.close_button.clicked.connect(self.close)
         self.issues_button.clicked.connect(self.show_issues)
         self.encoding_combo.currentIndexChanged.connect(self._encoding_changed)
-        self._shortcuts = install_viewer_shortcuts(self)
+        self._shortcut_manager = install_viewer_shortcuts(self)
 
     def _source_applied(
         self,
@@ -416,6 +425,8 @@ class MainWindow(QMainWindow):
     def _update_issues_button(self) -> None:
         count = len(self.controller.scan_issues) + len(self.presenter.errors)
         self.controls_panel.set_issue_count(count)
+        if self.issue_dialog.isVisible():
+            self.issue_dialog.set_messages(self._issue_messages())
 
     def _issue_messages(self) -> list[str]:
         messages = [

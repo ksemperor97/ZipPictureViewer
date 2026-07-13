@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from bisect import bisect_right
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .models import ImageEntry
 
@@ -9,10 +11,17 @@ from .models import ImageEntry
 class ViewerState:
     entries: list[ImageEntry] = field(default_factory=list)
     current_index: int = 0
+    _archive_starts: list[int] = field(default_factory=list, init=False, repr=False)
+    _archive_paths: list[Path] = field(default_factory=list, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.current_index = self._clamped_index(self.current_index)
+        self._rebuild_archive_index()
 
     def set_entries(self, entries: list[ImageEntry], current_index: int = 0) -> None:
         self.entries = entries
         self.current_index = self._clamped_index(current_index)
+        self._rebuild_archive_index()
 
     @property
     def has_entries(self) -> bool:
@@ -46,56 +55,43 @@ class ViewerState:
         return True
 
     def move_next_archive(self) -> bool:
-        current_entry = self.current_entry
-        if current_entry is None:
+        if len(self._archive_starts) <= 1:
             return False
-
-        for index in range(self.current_index + 1, len(self.entries)):
-            if self.entries[index].archive_path != current_entry.archive_path:
-                self.current_index = index
-                return True
-        self.current_index = 0
+        archive_index = self._current_archive_index()
+        self.current_index = self._archive_starts[
+            (archive_index + 1) % len(self._archive_starts)
+        ]
         return True
 
     def move_previous_archive(self) -> bool:
-        current_entry = self.current_entry
-        if current_entry is None:
+        if len(self._archive_starts) <= 1:
             return False
-
-        for index in range(self.current_index - 1, -1, -1):
-            if self.entries[index].archive_path != current_entry.archive_path:
-                self.current_index = self._first_index_for_archive(
-                    self.entries[index].archive_path
-                )
-                return True
-        self.current_index = self._first_index_for_archive(self.entries[-1].archive_path)
+        archive_index = self._current_archive_index()
+        self.current_index = self._archive_starts[
+            (archive_index - 1) % len(self._archive_starts)
+        ]
         return True
 
     def has_next_archive(self) -> bool:
-        current_entry = self.current_entry
-        if current_entry is None:
-            return False
-
-        if len({entry.archive_path for entry in self.entries}) > 1:
-            return True
-        return False
+        return len(self._archive_starts) > 1
 
     def has_previous_archive(self) -> bool:
-        current_entry = self.current_entry
-        if current_entry is None:
-            return False
-
-        if len({entry.archive_path for entry in self.entries}) > 1:
-            return True
-        return False
+        return len(self._archive_starts) > 1
 
     def _clamped_index(self, index: int) -> int:
         if not self.entries:
             return 0
         return max(0, min(index, len(self.entries) - 1))
 
-    def _first_index_for_archive(self, archive_path) -> int:
+    def _rebuild_archive_index(self) -> None:
+        self._archive_starts.clear()
+        self._archive_paths.clear()
+        previous_path: Path | None = None
         for index, entry in enumerate(self.entries):
-            if entry.archive_path == archive_path:
-                return index
-        return self.current_index
+            if index == 0 or entry.archive_path != previous_path:
+                self._archive_starts.append(index)
+                self._archive_paths.append(entry.archive_path)
+            previous_path = entry.archive_path
+
+    def _current_archive_index(self) -> int:
+        return max(0, bisect_right(self._archive_starts, self.current_index) - 1)

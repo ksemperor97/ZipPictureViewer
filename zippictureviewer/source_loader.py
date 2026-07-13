@@ -62,8 +62,10 @@ class SourceLoader(QObject):
         return True
 
     def cancel_current(self) -> bool:
-        cancelled = self.scanner.cancel(self.controller.load_generation)
-        if cancelled:
+        generation = self.controller.load_generation
+        was_pending = self.scanner.pending_generation == generation
+        cancelled = self.scanner.cancel(generation)
+        if cancelled and not was_pending:
             self.status_changed.emit("스캔 취소 요청됨…")
         return cancelled
 

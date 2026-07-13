@@ -40,8 +40,10 @@ class ImagePresenter(QObject):
         self.decoder = AsyncDecoder(parent=self)
         self.current_pixmap: QPixmap | None = None
         self.current_movie: MovieResource | None = None
+        self._movie_token: DisplayToken | None = None
         self.errors: dict[ImageEntry, str] = {}
-        self._preload_pending: set[ImageEntry] = set()
+        self._preload_pending: set[tuple[int, ImageEntry]] = set()
+        self._last_preload_index: int | None = None
         self.archive_access = ArchiveAccess()
         self._full_resolution_current: ImageEntry | None = None
         self._closing = False
@@ -61,6 +63,7 @@ class ImagePresenter(QObject):
         self.image_view.fit_requested.connect(self._fit_requested)
         self.image_view.viewport_resized.connect(self._viewport_resized)
         self.image_view.zoom_changed.connect(self._zoom_changed)
+        self.image_view.movie_failed.connect(self._movie_failed)
 
     def show_current(self) -> None:
         if self._closing:
@@ -142,6 +145,7 @@ class ImagePresenter(QObject):
         self.cache.clear()
         self.errors.clear()
         self._preload_pending.clear()
+        self._last_preload_index = None
         self.errors_changed.emit()
 
     def begin_shutdown(self) -> None:
@@ -160,9 +164,11 @@ class ImagePresenter(QObject):
 
     def stop_movie(self) -> None:
         if self.current_movie is None:
+            self._movie_token = None
             return
         self.current_movie.movie.stop()
         self.current_movie = None
+        self._movie_token = None
 
     def issue_messages(self) -> list[str]:
         return [
@@ -206,8 +212,11 @@ class ImagePresenter(QObject):
                     payload.animation_bytes,
                     token.entry.member_name,
                 )
-                self.image_view.set_movie(self.current_movie.movie)
+                self._movie_token = token
                 self._clear_error(token.entry)
+                self.image_view.set_movie(self.current_movie.movie)
+                if self.current_movie is None:
+                    return
                 self._schedule_preload(token)
             else:
                 raise ValueError("Decoder returned no displayable content")
@@ -222,11 +231,12 @@ class ImagePresenter(QObject):
         full_resolution: bool,
         preserve_existing: bool = False,
         invalid_password: bool = False,
+        resource_limit: bool = False,
     ) -> None:
         if self._closing:
             return
         if preload:
-            self._preload_pending.discard(token.entry)
+            self._preload_pending.discard((token.generation, token.entry))
             return
         if not self.controller.is_current_display(token):
             return
@@ -239,19 +249,19 @@ class ImagePresenter(QObject):
             self.errors[token.entry] = f"{resolution_kind} 해상도: {message}"
             if full_resolution:
                 self.image_view.fit_to_window()
-            self.status_changed.emit(
-                f"{self.state.position_label}  ·  {resolution_kind} 제한"
-            )
+            suffix = "자원 한도" if resource_limit else f"{resolution_kind} 제한"
+            self.status_changed.emit(f"{self.state.position_label}  ·  {suffix}")
             self.errors_changed.emit()
             return
-        self._show_decode_error(token, message)
+        status_kind = "자원 한도" if resource_limit else "오류"
+        self._show_decode_error(token, message, status_kind=status_kind)
 
     def _accept_preload(
         self,
         token: DisplayToken,
         payload: DecodedPayload,
     ) -> None:
-        self._preload_pending.discard(token.entry)
+        self._preload_pending.discard((token.generation, token.entry))
         if not self.controller.is_current_generation(token):
             return
         if payload.image is None:
@@ -291,7 +301,13 @@ class ImagePresenter(QObject):
             self.status_changed.emit(self.state.position_label)
         self._schedule_preload(token)
 
-    def _show_decode_error(self, token: DisplayToken, message: str) -> None:
+    def _show_decode_error(
+        self,
+        token: DisplayToken,
+        message: str,
+        *,
+        status_kind: str = "오류",
+    ) -> None:
         if self._closing or not self.controller.is_current_display(token):
             return
         self.stop_movie()
@@ -300,18 +316,31 @@ class ImagePresenter(QObject):
         self.image_view.show_message(
             f"이미지를 열 수 없습니다\n{token.entry.image_label}\n{message}"
         )
-        self.status_changed.emit(f"{self.state.position_label}  ·  오류")
+        self.status_changed.emit(f"{self.state.position_label}  ·  {status_kind}")
         self.errors_changed.emit()
+
+    def _movie_failed(self, message: str) -> None:
+        token = self._movie_token
+        if token is None or not self.controller.is_current_display(token):
+            return
+        self._show_decode_error(token, f"GIF 재생 오류: {message}")
 
     def _schedule_preload(self, token: DisplayToken) -> None:
         current_index = self.state.current_index
-        start = max(0, current_index - 2)
-        stop = min(len(self.state.entries), current_index + 4)
-        for entry in self.state.entries[start:stop]:
-            if not self._should_preload(entry, token.entry):
+        direction = 1
+        if self._last_preload_index is not None and current_index < self._last_preload_index:
+            direction = -1
+        self._last_preload_index = current_index
+        offsets = (1, 2, 3, -1, -2) if direction > 0 else (-1, -2, -3, 1, 2)
+        for offset in offsets:
+            index = current_index + offset
+            if not 0 <= index < len(self.state.entries):
+                continue
+            entry = self.state.entries[index]
+            if not self._should_preload(entry, token.entry, token.generation):
                 continue
             password = self.archive_access.cached_password(entry)
-            self._preload_pending.add(entry)
+            self._preload_pending.add((token.generation, entry))
             self.decoder.request(
                 DisplayToken(token.generation, entry),
                 preload=True,
@@ -319,10 +348,15 @@ class ImagePresenter(QObject):
                 scaled_size=self._fit_decode_size(),
             )
 
-    def _should_preload(self, entry: ImageEntry, current_entry: ImageEntry) -> bool:
+    def _should_preload(
+        self,
+        entry: ImageEntry,
+        current_entry: ImageEntry,
+        generation: int,
+    ) -> bool:
         if entry == current_entry or entry.is_animated:
             return False
-        if entry in self._preload_pending:
+        if (generation, entry) in self._preload_pending:
             return False
         if (
             entry.encryption is not None
@@ -378,10 +412,7 @@ class ImagePresenter(QObject):
         token = self.controller.begin_display()
         if token is None:
             return
-        requested_size = QSize(
-            max(1, pixmap.width() * 2),
-            max(1, pixmap.height() * 2),
-        )
+        requested_size = self._zoom_decode_size(pixmap)
         self.decoder.request(
             token,
             password=password,
@@ -434,4 +465,13 @@ class ImagePresenter(QObject):
         return QSize(
             max(1, int(viewport.width() * ratio)),
             max(1, int(viewport.height() * ratio)),
+        )
+
+    def _zoom_decode_size(self, pixmap: QPixmap) -> QSize:
+        ratio = max(1.0, self.image_view.viewport().devicePixelRatioF())
+        scale = max(1.0, self.image_view.transform().m11())
+        headroom = 1.1
+        return QSize(
+            max(1, int(pixmap.width() * scale * ratio * headroom)),
+            max(1, int(pixmap.height() * scale * ratio * headroom)),
         )

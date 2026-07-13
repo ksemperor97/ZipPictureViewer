@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import inf
-from zipfile import ZipFile, ZipInfo
+from zipfile import BadZipFile, ZipFile, ZipInfo
 
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QSize, Qt
 from PySide6.QtGui import QImage, QImageReader, QMovie, QPixmap
@@ -103,7 +103,7 @@ def read_image_bytes(
                         image_file,
                         limits.max_uncompressed_bytes,
                     )
-            except RuntimeError as error:
+            except (RuntimeError, BadZipFile) as error:
                 if entry.encryption == "zipcrypto":
                     raise InvalidPasswordError(
                         f"The ZIP password is incorrect: {entry.member_name}"
@@ -137,6 +137,7 @@ def load_image(
             decode_size.height(),
             entry.member_name,
             limits,
+            bytes_per_pixel=_reader_bytes_per_pixel(reader),
         )
         if decode_size != size:
             reader.setScaledSize(decode_size)
@@ -147,7 +148,7 @@ def load_image(
         suffix = f" ({detail})" if detail else ""
         raise ImageLoadError(f"Cannot load image: {entry.member_name}{suffix}")
     _validate_pixel_count(image.width(), image.height(), entry.member_name, limits)
-    _validate_decoded_bytes(image.width(), image.height(), entry.member_name, limits)
+    _validate_decoded_image(image, entry.member_name, limits)
 
     # byte_array and buffer stay local through reader.read(); QImage owns the
     # decoded pixels after this point.
@@ -261,7 +262,8 @@ def _validate_archive_member(info: ZipInfo, limits: ImageLoadLimits) -> None:
     if ratio > limits.max_compression_ratio:
         raise ResourceLimitError(
             f"Compression ratio for {info.filename} is {ratio:.1f}x; "
-            f"limit is {limits.max_compression_ratio:.1f}x"
+            f"limit is {limits.max_compression_ratio:.1f}x. "
+            "Recompress the member with a normal compression ratio before retrying."
         )
 
 
@@ -273,7 +275,8 @@ def _validate_uncompressed_size(
     if size > limits.max_uncompressed_bytes:
         raise ResourceLimitError(
             f"Uncompressed size for {member_name} is {size} bytes; "
-            f"limit is {limits.max_uncompressed_bytes} bytes"
+            f"limit is {limits.max_uncompressed_bytes} bytes. "
+            "Resize or recompress the image before retrying."
         )
 
 
@@ -287,7 +290,7 @@ def _validate_pixel_count(
     if pixels > limits.max_pixels:
         raise ResourceLimitError(
             f"Pixel count for {member_name} is {pixels}; "
-            f"limit is {limits.max_pixels}"
+            f"limit is {limits.max_pixels}. Resize the image before retrying."
         )
 
 
@@ -296,13 +299,41 @@ def _validate_decoded_bytes(
     height: int,
     member_name: str,
     limits: ImageLoadLimits,
+    *,
+    bytes_per_pixel: int = 4,
 ) -> None:
-    estimated_bytes = width * height * 4
+    estimated_bytes = width * height * bytes_per_pixel
     if estimated_bytes > limits.max_decoded_bytes:
         raise ResourceLimitError(
             f"Decoded memory for {member_name} is about {estimated_bytes} bytes; "
-            f"limit is {limits.max_decoded_bytes} bytes"
+            f"limit is {limits.max_decoded_bytes} bytes. "
+            "Convert the image to a smaller or 8-bit file before retrying."
         )
+
+
+def _validate_decoded_image(
+    image: QImage,
+    member_name: str,
+    limits: ImageLoadLimits,
+) -> None:
+    actual_bytes = image.sizeInBytes()
+    if actual_bytes > limits.max_decoded_bytes:
+        raise ResourceLimitError(
+            f"Decoded memory for {member_name} is {actual_bytes} bytes; "
+            f"limit is {limits.max_decoded_bytes} bytes. "
+            "Convert the image to a smaller or 8-bit file before retrying."
+        )
+
+
+def _reader_bytes_per_pixel(reader: QImageReader) -> int:
+    image_format_getter = getattr(reader, "imageFormat", None)
+    if image_format_getter is None:
+        return 4
+    image_format = image_format_getter()
+    if image_format == QImage.Format.Format_Invalid:
+        return 4
+    depth = QImage(1, 1, image_format).depth()
+    return max(4, (depth + 7) // 8)
 
 
 def _read_bounded(source, max_bytes: int) -> bytes:

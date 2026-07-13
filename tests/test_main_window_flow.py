@@ -7,6 +7,7 @@ from PySide6.QtCore import QMimeData, QUrl
 from PySide6.QtGui import QColor, QImage
 
 from zippictureviewer.session_store import SessionStore
+from zippictureviewer.models import ScanIssue
 from zippictureviewer.viewer_window import MainWindow
 
 
@@ -103,3 +104,45 @@ def test_empty_and_unsupported_folders_have_distinct_messages(
         == "지원되는 이미지 형식이 없습니다",
         timeout=3000,
     )
+
+
+def test_issue_dialog_shows_every_error_without_blocking(
+    qtbot,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    window = _window(qtbot, monkeypatch, tmp_path)
+    window.controller.scan_issues = [
+        ScanIssue(
+            target_path=tmp_path / f"broken-{index}.zip",
+            stage="scan_archive",
+            error_kind="bad_zip",
+            message=f"failure {index}",
+        )
+        for index in range(35)
+    ]
+    window._update_issues_button()
+
+    window.show_issues()
+
+    assert window.issue_dialog.isVisible()
+    assert not window.issue_dialog.isModal()
+    assert "failure 0" in window.issue_dialog.details.toPlainText()
+    assert "failure 34" in window.issue_dialog.details.toPlainText()
+    assert window.issue_dialog.summary_label.text().startswith("오류 35개")
+    window.close()
+
+
+def test_shortcut_help_is_available_inside_the_app(
+    qtbot,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    window = _window(qtbot, monkeypatch, tmp_path)
+    window._set_overlays_visible(True)
+
+    window.help_button.click()
+
+    assert window.shortcut_help_dialog.isVisible()
+    assert not window.shortcut_help_dialog.isModal()
+    window.close()

@@ -244,7 +244,7 @@ def test_stale_foreground_and_preload_results_are_discarded(
     assert current is not None
 
     stale_preload = DisplayToken(stale_foreground.generation, entries[1])
-    presenter._preload_pending.add(entries[1])
+    presenter._preload_pending.add((stale_preload.generation, entries[1]))
     presenter._decoded(
         stale_preload,
         DecodedPayload(image=_solid_image("green")),
@@ -306,6 +306,34 @@ def test_combo_up_key_is_not_taken_by_archive_navigation_shortcut(
     qtbot.keyClick(window.encoding_combo, Qt.Key.Key_Up)
 
     assert window.encoding_combo.currentIndex() == 0
+    window.close()
+
+
+def test_navigation_shortcut_still_works_after_a_button_takes_focus(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    window = _make_window(qtbot, monkeypatch)
+    entries = [
+        ImageEntry(tmp_path, "1.png", source_kind="folder"),
+        ImageEntry(tmp_path, "2.png", source_kind="folder"),
+    ]
+    window.state.set_entries(entries, current_index=1)
+    monkeypatch.setattr(window.presenter, "show_current", lambda: None)
+    manager = window._shortcut_manager
+    manager._sync_focus(None, window.previous_button)
+    left_shortcut = next(
+        shortcut
+        for shortcut in manager._navigation_shortcuts
+        if shortcut.key().toString() == "Left"
+    )
+    assert left_shortcut.context() == Qt.ShortcutContext.WindowShortcut
+    assert left_shortcut.isEnabled()
+
+    left_shortcut.activated.emit()
+
+    assert window.state.current_index == 0
     window.close()
 
 
@@ -452,7 +480,7 @@ def test_zoom_requests_more_pixels_without_changing_visual_zoom(
     request_token, options = requests[-1]
 
     assert options["preserve_zoom"]
-    assert options["scaled_size"].width() == 640
+    assert options["scaled_size"].width() >= int(320 * zoom_before_upgrade)
     presenter._show_decoded_image(
         request_token,
         _solid_image("blue", 640, 400),
@@ -461,6 +489,32 @@ def test_zoom_requests_more_pixels_without_changing_visual_zoom(
     assert not image_view.fit_mode
     assert image_view.transform().m11() < zoom_before_upgrade
     assert image_view.current_pixmap.size().toTuple() == (640, 400)
+
+
+def test_rapid_zoom_requests_resolution_for_the_final_scale(
+    qtbot,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    presenter, controller, image_view, _entries = _make_presenter(qtbot, tmp_path)
+    token = controller.begin_display()
+    assert token is not None
+    presenter._show_decoded_image(token, _solid_image("blue", 320, 200))
+    requests = []
+    monkeypatch.setattr(
+        presenter.decoder,
+        "request",
+        lambda request_token, **options: requests.append((request_token, options)),
+    )
+
+    for _ in range(10):
+        image_view.zoom_in()
+    final_scale = image_view.transform().m11()
+    qtbot.waitUntil(lambda: bool(requests), timeout=1000)
+
+    requested_size = requests[-1][1]["scaled_size"]
+    assert requested_size.width() >= int(320 * final_scale)
+    assert len(requests) == 1
 
 
 def test_successful_retry_clears_the_previous_error(qtbot, tmp_path) -> None:

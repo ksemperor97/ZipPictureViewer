@@ -4,8 +4,10 @@ import json
 import os
 import sys
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 from typing import Any, Sequence
 
 from .folder_context import FolderContext, coerce_folder_context
@@ -57,6 +59,7 @@ class SavedPosition:
 class SessionStore:
     def __init__(self, path: Path = SESSION_FILE) -> None:
         self.path = path
+        self._thread_lock = RLock()
 
     def last_context(self) -> FolderContext | None:
         context = FolderContext.from_dict(self._read().get("last_root"))
@@ -74,12 +77,13 @@ class SessionStore:
         """Persist a successfully opened root, including an empty root."""
 
         context = coerce_folder_context(root)
-        data = self._read()
-        data["version"] = SESSION_VERSION
-        data["last_root"] = context.to_dict()
-        if not isinstance(data.get("positions"), dict):
-            data["positions"] = {}
-        self._write(data)
+        with self._locked_update():
+            data = self._read_for_update()
+            data["version"] = SESSION_VERSION
+            data["last_root"] = context.to_dict()
+            if not isinstance(data.get("positions"), dict):
+                data["positions"] = {}
+            self._write(data)
 
     def save_position(
         self,
@@ -111,16 +115,17 @@ class SessionStore:
             global_index=max(index, 0),
         )
 
-        data = self._read()
-        positions = data.setdefault("positions", {})
-        if not isinstance(positions, dict):
-            positions = {}
-            data["positions"] = positions
+        with self._locked_update():
+            data = self._read_for_update()
+            positions = data.setdefault("positions", {})
+            if not isinstance(positions, dict):
+                positions = {}
+                data["positions"] = positions
 
-        data["version"] = SESSION_VERSION
-        data["last_root"] = context.to_dict()
-        positions[context.session_key] = position.to_dict()
-        self._write(data)
+            data["version"] = SESSION_VERSION
+            data["last_root"] = context.to_dict()
+            positions[context.session_key] = position.to_dict()
+            self._write(data)
 
     def restore_index(
         self,
@@ -227,9 +232,35 @@ class SessionStore:
         if not _looks_like_v1(raw_data):
             return _empty_session()
 
-        migrated = self._migrate_v1(raw_data)
-        self._write(migrated)
-        return migrated
+        with self._locked_update():
+            data = self._read_for_update()
+            self._write(data)
+            return data
+
+    def _read_for_update(self) -> dict[str, Any]:
+        raw_data = self._read_file()
+        if raw_data.get("version") == SESSION_VERSION:
+            return _normalized_v2(raw_data)
+        if _looks_like_v1(raw_data):
+            return self._migrate_v1(raw_data)
+        return _empty_session()
+
+    @contextmanager
+    def _locked_update(self):
+        with self._thread_lock:
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                lock_stream = self.path.with_name(f".{self.path.name}.lock").open("a+b")
+            except OSError:
+                yield
+                return
+
+            with lock_stream:
+                _lock_file(lock_stream)
+                try:
+                    yield
+                finally:
+                    _unlock_file(lock_stream)
 
     def _read_file(self) -> dict[str, Any]:
         if not self.path.exists():
@@ -331,6 +362,36 @@ def _looks_like_v1(data: dict[str, Any]) -> bool:
     if version not in (None, 1):
         return False
     return isinstance(data.get("last_root"), str) or isinstance(data.get("folders"), dict)
+
+
+def _lock_file(stream) -> None:
+    if sys.platform == "win32":
+        import msvcrt
+
+        stream.seek(0, os.SEEK_END)
+        if stream.tell() == 0:
+            stream.write(b"\0")
+            stream.flush()
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_file(stream) -> None:
+    if sys.platform == "win32":
+        import msvcrt
+
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
 def _resolve_for_identity(path: Path) -> Path:

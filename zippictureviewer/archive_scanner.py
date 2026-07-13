@@ -6,6 +6,7 @@ from typing import Callable
 from zipfile import BadZipFile, ZipInfo
 
 from .archive_metadata import (
+    ArchiveResourceLimitError,
     MetadataEncoding,
     ScanOptions,
     read_archive_infos,
@@ -107,9 +108,23 @@ def scan_image_index(
         try:
             if _is_archive_path(container_path):
                 encoding = options.encoding_for(container_path)
-                entries = _scan_archive(container_path, encoding)
+                entries = _scan_archive(
+                    container_path,
+                    encoding,
+                    max_members=options.max_archive_members,
+                    max_central_directory_bytes=options.max_central_directory_bytes,
+                    max_entries=options.max_index_entries - len(result.entries),
+                    cancel_check=cancel_check,
+                )
             else:
-                entries = _scan_folder(container_path)
+                entries = _scan_folder(
+                    container_path,
+                    max_entries=options.max_index_entries - len(result.entries),
+                    cancel_check=cancel_check,
+                )
+        except _ScanCancelled:
+            result.cancelled = True
+            break
         except _ARCHIVE_ERRORS as exc:
             result.issues.append(_issue_for(container_path, stage, exc))
         else:
@@ -175,35 +190,66 @@ def _discover_containers(
 def _scan_archive(
     archive_path: Path,
     metadata_encoding: MetadataEncoding,
+    *,
+    max_members: int = 100_000,
+    max_central_directory_bytes: int = 64 * 1024 * 1024,
+    max_entries: int = 100_000,
+    cancel_check: CancelCheck | None = None,
 ) -> list[ImageEntry]:
+    if max_entries <= 0:
+        raise ArchiveResourceLimitError("Image index entry limit has been reached.")
     revision = ContainerRevision.from_path(archive_path)
-    infos = read_archive_infos(archive_path, metadata_encoding)
-    entries = [
-        ImageEntry(
-            archive_path=archive_path,
-            member_name=info.filename,
-            member_id=ArchiveMemberId(
-                record_index=record_index,
-                header_offset=info.header_offset,
-                crc=info.CRC,
-            ),
-            source_revision=revision,
-            source_kind="archive",
-            encryption=_archive_encryption(info),
+    infos = read_archive_infos(
+        archive_path,
+        metadata_encoding,
+        max_members=max_members,
+        max_central_directory_bytes=max_central_directory_bytes,
+    )
+    entries: list[ImageEntry] = []
+    for record_index, info in enumerate(infos):
+        if cancel_check is not None and record_index % 256 == 0 and cancel_check():
+            raise _ScanCancelled
+        if info.is_dir() or not _is_image_member(info.filename):
+            continue
+        if len(entries) >= max_entries:
+            raise ArchiveResourceLimitError(
+                f"Image index exceeds the {max_entries}-entry remaining budget."
+            )
+        entries.append(
+            ImageEntry(
+                archive_path=archive_path,
+                member_name=info.filename,
+                member_id=ArchiveMemberId(
+                    record_index=record_index,
+                    header_offset=info.header_offset,
+                    crc=info.CRC,
+                ),
+                source_revision=revision,
+                source_kind="archive",
+                encryption=_archive_encryption(info),
+            )
         )
-        for record_index, info in enumerate(infos)
-        if not info.is_dir() and _is_image_member(info.filename)
-    ]
     return natural_sorted(entries, key=lambda entry: entry.member_name)
 
 
-def _scan_folder(folder_path: Path) -> list[ImageEntry]:
+def _scan_folder(
+    folder_path: Path,
+    *,
+    max_entries: int = 100_000,
+    cancel_check: CancelCheck | None = None,
+) -> list[ImageEntry]:
     entries: list[ImageEntry] = []
-    members = [
-        path.name
-        for path in folder_path.iterdir()
-        if path.is_file() and _is_image_member(path.name)
-    ]
+    members: list[str] = []
+    for index, path in enumerate(folder_path.iterdir()):
+        if cancel_check is not None and index % 256 == 0 and cancel_check():
+            raise _ScanCancelled
+        if not path.is_file() or not _is_image_member(path.name):
+            continue
+        if len(members) >= max_entries:
+            raise ArchiveResourceLimitError(
+                f"Image index exceeds the {max_entries}-entry remaining budget."
+            )
+        members.append(path.name)
     for member_name in natural_sorted(members):
         image_path = folder_path / member_name
         try:
@@ -224,7 +270,10 @@ def _scan_folder(folder_path: Path) -> list[ImageEntry]:
 
 
 def _issue_for(target_path: Path, stage: str, error: BaseException) -> ScanIssue:
-    if isinstance(error, BadZipFile):
+    if isinstance(error, ArchiveResourceLimitError):
+        error_kind = "resource_limit"
+        retryable = False
+    elif isinstance(error, BadZipFile):
         error_kind = "bad_zip"
         retryable = False
     elif isinstance(error, PermissionError):
@@ -289,6 +338,7 @@ def _has_extra_field(extra: bytes, field_id: int) -> bool:
 
 
 _ARCHIVE_ERRORS = (
+    ArchiveResourceLimitError,
     BadZipFile,
     EOFError,
     NotImplementedError,
@@ -296,3 +346,7 @@ _ARCHIVE_ERRORS = (
     UnicodeError,
     OSError,
 )
+
+
+class _ScanCancelled(Exception):
+    pass

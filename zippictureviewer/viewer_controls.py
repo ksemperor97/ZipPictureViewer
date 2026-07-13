@@ -72,6 +72,7 @@ class ViewerControls(FloatingPanel):
         "zoom_out_button",
         "zoom_in_button",
         "fullscreen_button",
+        "help_button",
         "cancel_scan_button",
         "minimize_button",
         "close_button",
@@ -94,6 +95,7 @@ class ViewerControls(FloatingPanel):
         self.zoom_out_button = QPushButton("축소 −")
         self.zoom_in_button = QPushButton("확대 +")
         self.fullscreen_button = QPushButton("전체화면")
+        self.help_button = QPushButton("도움말")
         self.cancel_scan_button = QPushButton("스캔 취소")
         self.minimize_button = QPushButton("최소화")
         self.close_button = QPushButton("닫기")
@@ -159,7 +161,8 @@ class ViewerControls(FloatingPanel):
         layout.addWidget(self.minimize_button, 3, 3)
         layout.addWidget(self.close_button, 3, 4)
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.status_label, 4, 0, 1, 5)
+        layout.addWidget(self.status_label, 4, 0, 1, 4)
+        layout.addWidget(self.help_button, 4, 4)
         self.setLayout(layout)
 
 

@@ -55,6 +55,23 @@ def test_load_image_rejects_pixel_limit_before_returning_image(
         load_image(entry, limits)
 
 
+def test_load_image_uses_the_actual_64_bit_pixel_buffer_size(
+    tmp_path: Path,
+    qapp,
+) -> None:
+    image_path = tmp_path / "rgba64.png"
+    image = QImage(32, 16, QImage.Format.Format_RGBA64)
+    image.fill(QColor("red"))
+    assert image.save(str(image_path), "PNG")
+    entry = ImageEntry(tmp_path, image_path.name, source_kind="folder")
+
+    with pytest.raises(ResourceLimitError, match="Decoded memory"):
+        load_image(
+            entry,
+            ImageLoadLimits(max_decoded_bytes=32 * 16 * 4),
+        )
+
+
 def test_uncompressed_and_compression_ratio_limits_are_enforced(
     tmp_path: Path,
 ) -> None:
@@ -145,6 +162,8 @@ def test_zipcrypto_password_is_session_supplied_and_aes_is_explicit(
         read_image_bytes(entry)
     with pytest.raises(InvalidPasswordError):
         read_image_bytes(entry, password=b"wrong")
+    with pytest.raises(InvalidPasswordError):
+        read_image_bytes(entry, password=b"wrong-123")
     assert read_image_bytes(entry, password=b"secret") == (
         b"not-an-image-but-decryption-test"
     )

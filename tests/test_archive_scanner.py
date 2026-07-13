@@ -28,10 +28,10 @@ def test_scan_isolates_bad_and_unreadable_archives(
 
     original_read_infos = archive_scanner.read_archive_infos
 
-    def deny_one_archive(path: Path, metadata_encoding: str):
+    def deny_one_archive(path: Path, metadata_encoding: str, **limits):
         if path == unreadable_path:
             raise PermissionError(13, "Permission denied", str(path))
-        return original_read_infos(path, metadata_encoding)
+        return original_read_infos(path, metadata_encoding, **limits)
 
     monkeypatch.setattr(archive_scanner, "read_archive_infos", deny_one_archive)
 
@@ -165,3 +165,22 @@ def test_scan_result_distinguishes_empty_and_unsupported_roots(
     assert unsupported_result.discovered_files == 1
     assert unsupported_result.containers_scanned == 0
     assert unsupported_result.entries == []
+
+
+def test_archive_member_budget_is_reported_without_indexing_the_archive(
+    tmp_path: Path,
+) -> None:
+    archive_path = tmp_path / "many.zip"
+    _write_archive(
+        archive_path,
+        [("1.png", b"one"), ("2.png", b"two")],
+    )
+
+    result = scan_image_index(
+        archive_path,
+        options=ScanOptions(max_archive_members=1, max_index_entries=1),
+    )
+
+    assert result.entries == []
+    assert len(result.issues) == 1
+    assert result.issues[0].error_kind == "resource_limit"

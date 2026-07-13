@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from threading import Event, Thread
 
 import pytest
 
@@ -47,6 +48,33 @@ def test_session_preserves_a_symlink_alias_as_the_logical_root(
     assert restored.logical_path == alias
     assert restored.access_path == real_root.resolve()
     assert _read_json(session_path)["last_root"]["logical_path"] == str(alias)
+
+
+def test_session_resolves_the_current_symlink_target_instead_of_stale_access(
+    tmp_path: Path,
+) -> None:
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    alias = tmp_path / "selected-alias"
+    try:
+        alias.symlink_to(first_root, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"Directory symlinks are unavailable: {error}")
+    store = SessionStore(tmp_path / "session.json")
+    store.save_root(FolderContext.from_path(alias))
+
+    alias.unlink()
+    alias.symlink_to(second_root, target_is_directory=True)
+
+    restored = store.last_context()
+    assert restored is not None
+    assert restored.logical_path == alias
+    assert restored.access_path == second_root.resolve()
+
+    alias.unlink()
+    assert store.last_context() is None
 
 
 def test_save_position_keeps_the_legacy_three_argument_api(tmp_path: Path) -> None:
@@ -301,6 +329,52 @@ def test_failed_atomic_replace_preserves_previous_session(
 
     assert session_path.read_text(encoding="utf-8") == old_payload
     assert list(session_path.parent.glob(f".{session_path.name}.*.tmp")) == []
+
+
+def test_concurrent_session_updates_preserve_positions_for_both_roots(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    session_path = tmp_path / "session.json"
+    first_store = SessionStore(session_path)
+    second_store = SessionStore(session_path)
+    first_entry = ImageEntry(first_root, "1.png", source_kind="folder")
+    second_entry = ImageEntry(second_root, "2.png", source_kind="folder")
+    first_read_started = Event()
+    release_first_read = Event()
+    real_read = first_store._read_for_update
+
+    def paused_read():
+        data = real_read()
+        first_read_started.set()
+        release_first_read.wait(5)
+        return data
+
+    monkeypatch.setattr(first_store, "_read_for_update", paused_read)
+    first_thread = Thread(
+        target=first_store.save_position,
+        args=(first_root, first_entry, 0, [first_entry]),
+    )
+    second_thread = Thread(
+        target=second_store.save_position,
+        args=(second_root, second_entry, 0, [second_entry]),
+    )
+    first_thread.start()
+    assert first_read_started.wait(2)
+    second_thread.start()
+    assert second_thread.is_alive()
+
+    release_first_read.set()
+    first_thread.join(2)
+    second_thread.join(2)
+
+    positions = _read_json(session_path)["positions"]
+    assert str(first_root) in positions
+    assert str(second_root) in positions
 
 
 def _read_json(path: Path) -> dict:

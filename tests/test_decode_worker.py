@@ -6,6 +6,7 @@ from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QImage
 
 from zippictureviewer.decode_worker import AsyncDecoder
+from zippictureviewer.image_loader import ResourceLimitError
 from zippictureviewer.models import ImageEntry
 from zippictureviewer.viewer_controller import DisplayToken
 
@@ -44,6 +45,7 @@ def test_async_decoder_reports_failure_without_raising(tmp_path: Path, qtbot) ->
         full_resolution,
         preserve_zoom,
         invalid_password,
+        resource_limit,
     ) = signal.args
     assert returned_token == token
     assert "missing.png" in message or "No such file" in message
@@ -51,6 +53,7 @@ def test_async_decoder_reports_failure_without_raising(tmp_path: Path, qtbot) ->
     assert full_resolution
     assert not preserve_zoom
     assert not invalid_password
+    assert not resource_limit
 
 
 def test_async_decoder_separates_fit_preview_from_full_resolution(
@@ -75,3 +78,26 @@ def test_async_decoder_separates_fit_preview_from_full_resolution(
     full_payload = full_signal.args[1]
     assert full_payload.image.size() == image.size()
     assert full_payload.full_resolution
+
+
+def test_async_decoder_classifies_resource_limit_failures(
+    tmp_path: Path,
+    qtbot,
+    monkeypatch,
+) -> None:
+    import zippictureviewer.decode_worker as decode_worker
+
+    (tmp_path / "large.png").write_bytes(b"placeholder")
+    entry = ImageEntry(tmp_path, "large.png", source_kind="folder")
+    token = DisplayToken(4, entry)
+    decoder = AsyncDecoder()
+    monkeypatch.setattr(
+        decode_worker,
+        "load_image",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ResourceLimitError("too large")),
+    )
+
+    with qtbot.waitSignal(decoder.failed, timeout=3000) as signal:
+        decoder.request(token, scaled_size=QSize(100, 100))
+
+    assert signal.args[-1] is True

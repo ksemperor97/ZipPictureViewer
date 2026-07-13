@@ -4,13 +4,14 @@ import base64
 from pathlib import Path
 
 import pytest
-from PySide6.QtGui import QColor, QImage, QPixmap
+from PySide6.QtGui import QColor, QImage, QMovie, QPixmap
 from PySide6.QtWidgets import QInputDialog, QWidget
 
 from zippictureviewer.archive_access import ArchiveAccessDecision
 from zippictureviewer.archive_scanner import scan_image_index
 from zippictureviewer.decode_worker import DecodedPayload
 from zippictureviewer.folder_context import FolderContext
+from zippictureviewer.image_loader import MovieResource
 from zippictureviewer.image_view import ImageView
 from zippictureviewer.models import ContainerRevision, ImageEntry
 from zippictureviewer.viewer_controller import ViewerController
@@ -226,6 +227,27 @@ def test_show_current_is_a_noop_after_shutdown(
     assert controller.display_generation == shutdown_generation
     assert access_calls == []
     assert decode_requests == []
+
+
+def test_movie_playback_error_is_added_to_the_visible_error_state(
+    qtbot,
+    tmp_path: Path,
+) -> None:
+    entry = ImageEntry(tmp_path, "broken.gif", source_kind="folder")
+    presenter, controller, image_view = _make_presenter(
+        qtbot,
+        FolderContext.from_path(tmp_path),
+        [entry],
+    )
+    token = controller.begin_display()
+    assert token is not None
+    presenter.current_movie = MovieResource(QMovie())
+    presenter._movie_token = token
+
+    image_view.movie_failed.emit("unexpected end of file")
+
+    assert "GIF 재생 오류" in presenter.errors[entry]
+    assert "unexpected end of file" in image_view.current_message
 
 
 @pytest.mark.parametrize(

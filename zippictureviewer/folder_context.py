@@ -58,20 +58,16 @@ class FolderContext:
             return None
 
         logical_path = value.get("logical_path")
-        access_path = value.get("access_path")
         source_kind = value.get("source_kind")
         if not isinstance(logical_path, str):
             return None
         if not isinstance(source_kind, str) or source_kind not in ("folder", "archive"):
             return None
 
-        logical = _absolute_without_resolving(Path(logical_path))
-        access = (
-            _absolute_without_resolving(Path(access_path))
-            if isinstance(access_path, str)
-            else _resolve_for_access(logical)
-        )
-        return cls(logical, access, source_kind)
+        # A serialized access path is provenance, not authority. Resolve the
+        # logical path again so a retargeted or deleted symlink cannot display
+        # one collection under another collection's alias.
+        return cls.from_path(Path(logical_path), source_kind)
 
     @property
     def session_key(self) -> str:

@@ -24,6 +24,7 @@ class ImageView(QGraphicsView):
     viewport_resized = Signal(QSize)
     zoom_resolution_requested = Signal()
     zoom_changed = Signal(bool)
+    movie_failed = Signal(str)
 
     def __init__(self) -> None:
         scene = QGraphicsScene()
@@ -78,6 +79,7 @@ class ImageView(QGraphicsView):
         self._movie = movie
         self._movie_frame_size = QSize()
         movie.frameChanged.connect(self._update_movie_frame)
+        movie.error.connect(self._handle_movie_error)
         self._message_item.hide()
         self._pixmap_item.show()
         if movie.currentPixmap().isNull():
@@ -254,11 +256,21 @@ class ImageView(QGraphicsView):
         if self._fit_mode and frame_size_changed:
             self.fit_to_window()
 
+    def _handle_movie_error(self, _error) -> None:
+        if self._movie is None:
+            return
+        detail = self._movie.lastErrorString().strip()
+        self.movie_failed.emit(detail or "GIF animation playback failed")
+
     def _detach_movie(self) -> None:
         if self._movie is None:
             return
         try:
             self._movie.frameChanged.disconnect(self._update_movie_frame)
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            self._movie.error.disconnect(self._handle_movie_error)
         except (RuntimeError, TypeError):
             pass
         self._movie = None
