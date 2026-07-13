@@ -14,12 +14,26 @@ from pathlib import Path
 
 try:
     from .check_release_version import read_project_version
+    from .generate_build_provenance import (
+        DEPENDENCY_MANIFEST_FILENAME,
+        PROVENANCE_FILENAME,
+        check_distribution_metadata,
+        validate_build_provenance,
+    )
 except ImportError:
     from check_release_version import read_project_version
+    from generate_build_provenance import (
+        DEPENDENCY_MANIFEST_FILENAME,
+        PROVENANCE_FILENAME,
+        check_distribution_metadata,
+        validate_build_provenance,
+    )
 
 
 REQUIRED_BUNDLE_PATHS = (
     "ZipPictureViewer.exe",
+    f"_internal/release/{PROVENANCE_FILENAME}",
+    f"_internal/release/{DEPENDENCY_MANIFEST_FILENAME}",
     "_internal/PySide6/Qt/plugins/platforms/qwindows.dll",
     "_internal/PySide6/Qt/plugins/imageformats/qgif.dll",
     "_internal/PySide6/Qt/plugins/imageformats/qjpeg.dll",
@@ -90,6 +104,12 @@ def check_archive(archive: Path, app_dir: Path, version: str) -> list[str]:
             for relative_path in REQUIRED_BUNDLE_PATHS:
                 if prefix + relative_path not in members:
                     errors.append(f"Archive is missing {prefix + relative_path}")
+            metadata_prefix = prefix + "_internal/"
+            if not any(
+                member.startswith(metadata_prefix) and member.endswith(".dist-info/METADATA")
+                for member in members
+            ):
+                errors.append("Archive is missing bundled distribution metadata")
 
             for item in bundle_zip.infolist():
                 mode = item.external_attr >> 16
@@ -118,10 +138,7 @@ def check_product_version(executable: Path, expected_version: str) -> list[str]:
     if version == expected_version:
         return []
     details = f" ({error})" if error else ""
-    return [
-        f"Executable product version is {version!r}; expected {expected_version!r}"
-        f"{details}"
-    ]
+    return [f"Executable product version is {version!r}; expected {expected_version!r}{details}"]
 
 
 def _powershell_file_property(executable: Path, expression: str) -> tuple[str, str]:
@@ -150,13 +167,11 @@ def _powershell_file_property(executable: Path, expression: str) -> tuple[str, s
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--app-dir", type=Path, default=Path("dist/ZipPictureViewer")
-    )
+    parser.add_argument("--app-dir", type=Path, default=Path("dist/ZipPictureViewer"))
     parser.add_argument("--archive", type=Path)
-    parser.add_argument(
-        "--project-root", type=Path, default=Path(__file__).resolve().parents[1]
-    )
+    parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--expected-commit")
+    parser.add_argument("--require-clean-provenance", action="store_true")
     parser.add_argument("--require-authenticode", action="store_true")
     return parser.parse_args()
 
@@ -166,6 +181,15 @@ def main() -> int:
     version = read_project_version(args.project_root.resolve())
     app_dir = args.app_dir.resolve()
     errors = check_bundle_layout(app_dir)
+    errors.extend(
+        validate_build_provenance(
+            app_dir / "_internal/release",
+            expected_version=version,
+            expected_commit=args.expected_commit,
+            require_clean=args.require_clean_provenance,
+        )
+    )
+    errors.extend(check_distribution_metadata(app_dir, expected_version=version))
     if os.name == "nt":
         errors.extend(check_product_version(app_dir / "ZipPictureViewer.exe", version))
     if args.archive:

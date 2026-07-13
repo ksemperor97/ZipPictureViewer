@@ -11,8 +11,20 @@ from pathlib import Path
 
 try:
     from .check_release_version import read_project_version
+    from .generate_build_provenance import (
+        DEPENDENCY_MANIFEST_FILENAME,
+        PROVENANCE_FILENAME,
+        check_distribution_metadata,
+        validate_build_provenance,
+    )
 except ImportError:
     from check_release_version import read_project_version
+    from generate_build_provenance import (
+        DEPENDENCY_MANIFEST_FILENAME,
+        PROVENANCE_FILENAME,
+        check_distribution_metadata,
+        validate_build_provenance,
+    )
 
 
 MACHO_MAGICS = {
@@ -28,6 +40,8 @@ MACHO_MAGICS = {
 
 REQUIRED_BUNDLE_PATHS = (
     "Contents/MacOS/ZipPictureViewer",
+    f"Contents/Resources/release/{PROVENANCE_FILENAME}",
+    f"Contents/Resources/release/{DEPENDENCY_MANIFEST_FILENAME}",
     "Contents/Frameworks/PySide6/Qt/plugins/platforms/libqcocoa.dylib",
     "Contents/Frameworks/PySide6/Qt/plugins/imageformats/libqgif.dylib",
     "Contents/Frameworks/PySide6/Qt/plugins/imageformats/libqjpeg.dylib",
@@ -65,9 +79,7 @@ FORBIDDEN_BUNDLE_PATHS = (
 
 
 def find_dangling_symlinks(app_dir: Path) -> list[Path]:
-    return sorted(
-        path for path in app_dir.rglob("*") if path.is_symlink() and not path.exists()
-    )
+    return sorted(path for path in app_dir.rglob("*") if path.is_symlink() and not path.exists())
 
 
 def is_macho(path: Path) -> bool:
@@ -110,9 +122,7 @@ def macos_version_key(version: str) -> tuple[int, ...]:
     return (*parts, *(0 for _ in range(max(0, 4 - len(parts)))))
 
 
-def check_macho_minimum_versions(
-    app_dir: Path, target_macos: str
-) -> tuple[list[str], int]:
+def check_macho_minimum_versions(app_dir: Path, target_macos: str) -> tuple[list[str], int]:
     errors: list[str] = []
     target_key = macos_version_key(target_macos)
     macho_files = find_macho_files(app_dir)
@@ -144,9 +154,7 @@ def check_macho_minimum_versions(
     return errors, len(macho_files)
 
 
-def check_bundle_metadata(
-    app_dir: Path, expected_version: str, target_macos: str
-) -> list[str]:
+def check_bundle_metadata(app_dir: Path, expected_version: str, target_macos: str) -> list[str]:
     info_path = app_dir / "Contents/Info.plist"
     try:
         with info_path.open("rb") as info_file:
@@ -162,8 +170,7 @@ def check_bundle_metadata(
     minimum_system_version = info.get("LSMinimumSystemVersion")
     if minimum_system_version != target_macos:
         errors.append(
-            f"LSMinimumSystemVersion is {minimum_system_version!r}; "
-            f"expected {target_macos!r}"
+            f"LSMinimumSystemVersion is {minimum_system_version!r}; expected {target_macos!r}"
         )
     return errors
 
@@ -181,11 +188,61 @@ def check_code_signature(app_dir: Path) -> list[str]:
     return [f"Code signature verification failed: {details}"]
 
 
+def check_developer_id_signature(app_dir: Path) -> list[str]:
+    result = subprocess.run(
+        ["codesign", "--display", "--verbose=4", str(app_dir)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    details = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    if result.returncode != 0:
+        return [f"Cannot inspect Developer ID signature: {details.strip()}"]
+
+    errors: list[str] = []
+    if "Authority=Developer ID Application:" not in details:
+        errors.append("Application is not signed with a Developer ID Application identity")
+    if "runtime" not in details:
+        errors.append("Developer ID signature does not enable the hardened runtime")
+    if "Timestamp=" not in details or "Timestamp=none" in details:
+        errors.append("Developer ID signature does not include a secure timestamp")
+    return errors
+
+
+def check_notarization(app_dir: Path) -> list[str]:
+    checks = (
+        (
+            ["xcrun", "stapler", "validate", "-v", str(app_dir)],
+            "Stapled notarization ticket validation failed",
+        ),
+        (
+            ["spctl", "--assess", "--type", "execute", "--verbose=4", str(app_dir)],
+            "Gatekeeper assessment failed",
+        ),
+    )
+    errors: list[str] = []
+    for command, message in checks:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            details = result.stderr.strip() or result.stdout.strip()
+            errors.append(f"{message}: {details}")
+    return errors
+
+
 def validate_bundle(
     app_dir: Path,
     project_root: Path,
     target_macos: str,
     verify_signature: bool = True,
+    expected_commit: str | None = None,
+    require_clean_provenance: bool = False,
+    require_developer_id: bool = False,
+    require_notarized: bool = False,
 ) -> tuple[list[str], int]:
     if not app_dir.is_dir():
         return [f"Application bundle does not exist: {app_dir}"], 0
@@ -193,6 +250,15 @@ def validate_bundle(
     errors: list[str] = []
     expected_version = read_project_version(project_root)
     errors.extend(check_bundle_metadata(app_dir, expected_version, target_macos))
+    errors.extend(
+        validate_build_provenance(
+            app_dir / "Contents/Resources/release",
+            expected_version=expected_version,
+            expected_commit=expected_commit,
+            require_clean=require_clean_provenance,
+        )
+    )
+    errors.extend(check_distribution_metadata(app_dir, expected_version=expected_version))
 
     for relative_path in REQUIRED_BUNDLE_PATHS:
         if not (app_dir / relative_path).is_file():
@@ -208,6 +274,10 @@ def validate_bundle(
     errors.extend(minos_errors)
     if verify_signature:
         errors.extend(check_code_signature(app_dir))
+    if require_developer_id:
+        errors.extend(check_developer_id_signature(app_dir))
+    if require_notarized:
+        errors.extend(check_notarization(app_dir))
     return errors, macho_count
 
 
@@ -219,11 +289,13 @@ def parse_args() -> argparse.Namespace:
         default=Path("dist/ZipPictureViewer.app"),
         help="application bundle to validate",
     )
-    parser.add_argument(
-        "--project-root", type=Path, default=Path(__file__).resolve().parents[1]
-    )
+    parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--target-macos", default="13.0")
     parser.add_argument("--skip-signature", action="store_true")
+    parser.add_argument("--expected-commit")
+    parser.add_argument("--require-clean-provenance", action="store_true")
+    parser.add_argument("--require-developer-id", action="store_true")
+    parser.add_argument("--require-notarized", action="store_true")
     return parser.parse_args()
 
 
@@ -235,6 +307,10 @@ def main() -> int:
             args.project_root.resolve(),
             args.target_macos,
             verify_signature=not args.skip_signature,
+            expected_commit=args.expected_commit,
+            require_clean_provenance=args.require_clean_provenance,
+            require_developer_id=args.require_developer_id,
+            require_notarized=args.require_notarized,
         )
     except (OSError, ValueError) as exc:
         print(f"macOS bundle check failed: {exc}", file=sys.stderr)
@@ -245,10 +321,7 @@ def main() -> int:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
-    print(
-        f"Validated {args.app}: {macho_count} Mach-O files support "
-        f"macOS {args.target_macos}"
-    )
+    print(f"Validated {args.app}: {macho_count} Mach-O files support macOS {args.target_macos}")
     return 0
 
 

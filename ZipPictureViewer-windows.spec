@@ -1,7 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import sys
 from pathlib import Path
 
+from PyInstaller.utils.hooks import copy_metadata
 from PyInstaller.utils.win32.versioninfo import (
     FixedFileInfo,
     StringFileInfo,
@@ -17,6 +19,25 @@ from scripts.check_release_version import read_project_version, windows_version_
 PROJECT_ROOT = Path(SPECPATH).resolve()
 APP_VERSION = read_project_version(PROJECT_ROOT)
 WINDOWS_VERSION = windows_version_tuple(APP_VERSION)
+
+# Editable installs expose a source-tree egg-info before their installed dist-info.
+# Bundle the installed metadata so importlib.metadata observes wheel-style metadata.
+ORIGINAL_SYS_PATH = sys.path.copy()
+try:
+    sys.path[:] = [
+        entry
+        for entry in sys.path
+        if entry and Path(entry).resolve() != PROJECT_ROOT
+    ]
+    DISTRIBUTION_METADATA = copy_metadata('zip-picture-viewer')
+finally:
+    sys.path[:] = ORIGINAL_SYS_PATH
+
+RELEASE_METADATA_DIR = PROJECT_ROOT / 'build' / 'release-metadata'
+RELEASE_METADATA_DATAS = [
+    (str(RELEASE_METADATA_DIR / 'build-provenance.json'), 'release'),
+    (str(RELEASE_METADATA_DIR / 'dependency-manifest.txt'), 'release'),
+]
 VERSION_INFO = VSVersionInfo(
     ffi=FixedFileInfo(filevers=WINDOWS_VERSION, prodvers=WINDOWS_VERSION),
     kids=[
@@ -44,7 +65,7 @@ a = Analysis(
     ['zippictureviewer_launcher.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[*DISTRIBUTION_METADATA, *RELEASE_METADATA_DATAS],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

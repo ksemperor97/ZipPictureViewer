@@ -49,7 +49,7 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
-          Archives=(dist/ZipPictureViewer-v${{ steps.metadata.outputs.version }}-mac-*-slim.zip)
+          Archives=(dist/ZipPictureViewer-v${{ steps.metadata.outputs.version }}-mac-*-slim-adhoc.zip)
           if (( ${#Archives[@]} != 1 )); then
             echo "Expected one macOS archive, found ${#Archives[@]}" >&2
             exit 1
@@ -62,7 +62,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.package.outputs.name }}
-          path: ${{ steps.package.outputs.path }}
+          path: |
+            ${{ steps.package.outputs.path }}
+            ${{ steps.package.outputs.path }}.sha256
           if-no-files-found: error
 
   windows-package:
@@ -107,5 +109,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ZipPictureViewer-v${{ steps.metadata.outputs.version }}-windows-x64
-          path: dist/ZipPictureViewer-v${{ steps.metadata.outputs.version }}-windows-x64.zip
+          path: |
+            dist/ZipPictureViewer-v${{ steps.metadata.outputs.version }}-windows-x64.zip
+            dist/ZipPictureViewer-v${{ steps.metadata.outputs.version }}-windows-x64.zip.sha256
           if-no-files-found: error
