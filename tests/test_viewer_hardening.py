@@ -11,6 +11,8 @@ from zippictureviewer.decode_worker import DecodedPayload
 from zippictureviewer.folder_context import FolderContext
 from zippictureviewer.image_view import ImageView
 from zippictureviewer.models import ImageEntry, ScanResult
+from zippictureviewer.session_store import SessionStore
+from zippictureviewer.source_loader import SourceLoader
 from zippictureviewer.viewer_controller import DisplayToken, ViewerController
 from zippictureviewer.viewer_presenter import ImagePresenter
 from zippictureviewer.viewer_window import MainWindow
@@ -93,6 +95,37 @@ def test_close_waits_for_a_running_scan_thread(qtbot, monkeypatch, tmp_path) -> 
 
     qtbot.waitUntil(lambda: window.scanner.active_count == 0, timeout=3000)
     qtbot.waitUntil(lambda: not window.isVisible(), timeout=3000)
+
+
+def test_immediate_close_cancels_deferred_session_restore(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    root = tmp_path / "last-source"
+    root.mkdir()
+    store = SessionStore(tmp_path / "session.json")
+    store.save_root(root)
+    load_calls = []
+    monkeypatch.setattr(
+        "zippictureviewer.viewer_window.SessionStore",
+        lambda: store,
+    )
+    monkeypatch.setattr(
+        SourceLoader,
+        "load",
+        lambda _self, context: load_calls.append(context) or True,
+    )
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    assert window._restore_timer.isActive()
+
+    assert window.close()
+    qtbot.wait(10)
+
+    assert not window._restore_timer.isActive()
+    assert load_calls == []
 
 
 def test_stale_foreground_and_preload_results_are_discarded(

@@ -66,6 +66,12 @@ class MainWindow(QMainWindow):
         self._close_poll_timer = QTimer(self)
         self._close_poll_timer.setInterval(50)
         self._close_poll_timer.timeout.connect(self._finish_close_when_idle)
+        self._restore_timer = QTimer(self)
+        self._restore_timer.setSingleShot(True)
+        self._restore_timer.timeout.connect(self._restore_last_source)
+        self._focus_timer = QTimer(self)
+        self._focus_timer.setSingleShot(True)
+        self._focus_timer.timeout.connect(self.image_view.setFocus)
 
         self.viewer_surface = ViewerSurface(
             self.image_view,
@@ -93,8 +99,8 @@ class MainWindow(QMainWindow):
         self.source_loader.source_applied.connect(self._source_applied)
         self.source_loader.source_rejected.connect(self._source_rejected)
         QApplication.instance().installEventFilter(self)
-        QTimer.singleShot(0, self._restore_last_source)
-        QTimer.singleShot(0, self.image_view.setFocus)
+        self._restore_timer.start(0)
+        self._focus_timer.start(0)
 
     @property
     def current_context(self) -> FolderContext | None:
@@ -129,6 +135,8 @@ class MainWindow(QMainWindow):
         self.load_source(root)
 
     def load_source(self, source: Path | FolderContext) -> None:
+        if self._closing:
+            return
         context = (
             source
             if isinstance(source, FolderContext)
@@ -216,6 +224,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._closing = True
+        self._restore_timer.stop()
+        self._focus_timer.stop()
         self.overlays.stop()
         self.source_loader.begin_shutdown()
         self.presenter.begin_shutdown()
@@ -332,7 +342,11 @@ class MainWindow(QMainWindow):
         self.position_saver.schedule(context, self.state)
 
     def _restore_last_source(self) -> None:
-        if self.current_context is not None or self.controller.pending_context is not None:
+        if (
+            self._closing
+            or self.current_context is not None
+            or self.controller.pending_context is not None
+        ):
             return
         context = self.session_store.last_context()
         if context is not None:
