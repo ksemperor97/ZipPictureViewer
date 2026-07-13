@@ -3,7 +3,7 @@ from __future__ import annotations
 from threading import Event
 from time import monotonic
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QMimeData, Qt, QUrl
 from PySide6.QtGui import QColor, QImage, QPixmap
 from PySide6.QtWidgets import QWidget
 
@@ -31,6 +31,23 @@ def _solid_image(color: str, width: int = 32, height: int = 24) -> QImage:
     image = QImage(width, height, QImage.Format.Format_RGB32)
     image.fill(QColor(color))
     return image
+
+
+class _DropEvent:
+    def __init__(self, path) -> None:
+        self._mime_data = QMimeData()
+        self._mime_data.setUrls([QUrl.fromLocalFile(str(path))])
+        self.ignored = False
+        self.accepted = False
+
+    def mimeData(self):  # noqa: N802
+        return self._mime_data
+
+    def ignore(self) -> None:
+        self.ignored = True
+
+    def acceptProposedAction(self) -> None:  # noqa: N802
+        self.accepted = True
 
 
 def _make_presenter(qtbot, tmp_path):
@@ -126,6 +143,89 @@ def test_immediate_close_cancels_deferred_session_restore(
 
     assert not window._restore_timer.isActive()
     assert load_calls == []
+
+
+def test_ignored_close_disables_controls_and_blocks_new_user_work(
+    qtbot,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    window = _make_window(qtbot, monkeypatch)
+    first_container = tmp_path / "first"
+    second_container = tmp_path / "second"
+    first_container.mkdir()
+    second_container.mkdir()
+    context = FolderContext.from_path(tmp_path)
+    entries = [
+        ImageEntry(first_container, "1.png", source_kind="folder"),
+        ImageEntry(second_container, "2.png", source_kind="folder"),
+    ]
+    generation = window.controller.begin_load(context)
+    assert window.controller.apply_load(generation, entries)
+    window.current_root = context.logical_path
+    window._update_navigation()
+
+    busy = True
+    load_calls = []
+    display_calls = []
+    dialog_calls = []
+    monkeypatch.setattr(
+        window.presenter,
+        "wait_for_done",
+        lambda _timeout=0: not busy,
+    )
+    monkeypatch.setattr(
+        window.presenter,
+        "show_current",
+        lambda: display_calls.append(True),
+    )
+    monkeypatch.setattr(
+        window.source_loader,
+        "load",
+        lambda source: load_calls.append(source) or True,
+    )
+    monkeypatch.setattr(
+        "zippictureviewer.viewer_window.QFileDialog.getExistingDirectory",
+        lambda *_args: dialog_calls.append("folder") or str(tmp_path),
+    )
+    monkeypatch.setattr(
+        "zippictureviewer.viewer_window.QFileDialog.getOpenFileName",
+        lambda *_args: dialog_calls.append("archive") or ("", ""),
+    )
+
+    assert not window.close()
+    assert window.isVisible()
+    assert window._closing
+    assert not window.controls_panel.isEnabled()
+    assert not window.image_view.isEnabled()
+    assert not window.acceptDrops()
+
+    window.show_current_image()
+    window.show_next_image()
+    window.show_previous_image()
+    window.show_next_archive()
+    window.show_previous_archive()
+    window.open_next_sibling_folder()
+    window.open_previous_sibling_folder()
+    window.refresh_source()
+    window.open_folder()
+    window.open_archive()
+    window.load_source(tmp_path)
+
+    drag_event = _DropEvent(tmp_path)
+    drop_event = _DropEvent(tmp_path)
+    window.dragEnterEvent(drag_event)
+    window.dropEvent(drop_event)
+
+    assert window.state.current_index == 0
+    assert display_calls == []
+    assert load_calls == []
+    assert dialog_calls == []
+    assert drag_event.ignored and not drag_event.accepted
+    assert drop_event.ignored and not drop_event.accepted
+
+    busy = False
+    assert window.close()
 
 
 def test_stale_foreground_and_preload_results_are_discarded(

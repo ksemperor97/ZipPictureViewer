@@ -44,11 +44,14 @@ class SourceLoader(QObject):
             if isinstance(source, FolderContext)
             else FolderContext.from_path(source)
         )
+        generation = self.controller.begin_load(context)
         if not context.is_accessible:
+            self.scanner.cancel_except(generation)
+            self.controller.reject_load(generation)
+            self.scanning_changed.emit(False)
             self.source_rejected.emit(f"열 수 없는 경로: {context.logical_path}")
             return False
 
-        generation = self.controller.begin_load(context)
         options = ScanOptions(
             metadata_encoding=self.root_encoding(context),
             encoding_overrides=self._encoding_overrides,

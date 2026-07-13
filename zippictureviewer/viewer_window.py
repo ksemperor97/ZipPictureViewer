@@ -115,11 +115,15 @@ class MainWindow(QMainWindow):
         return self.presenter.current_movie
 
     def open_folder(self) -> None:
+        if self._closing:
+            return
         selected = QFileDialog.getExistingDirectory(self, "이미지 컬렉션 폴더 선택")
         if selected:
             self.load_source(Path(selected))
 
     def open_archive(self) -> None:
+        if self._closing:
+            return
         selected, _ = QFileDialog.getOpenFileName(
             self,
             "ZIP/CBZ 선택",
@@ -151,6 +155,8 @@ class MainWindow(QMainWindow):
             self.overlays.show_temporarily()
 
     def refresh_source(self) -> None:
+        if self._closing:
+            return
         if self.current_context is not None:
             self.load_source(self.current_context)
 
@@ -160,12 +166,18 @@ class MainWindow(QMainWindow):
             self.overlays.show_temporarily()
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802
+        if self._closing:
+            event.ignore()
+            return
         if self._dropped_source(event.mimeData()) is None:
             event.ignore()
             return
         event.acceptProposedAction()
 
     def dropEvent(self, event) -> None:  # noqa: N802
+        if self._closing:
+            event.ignore()
+            return
         source = self._dropped_source(event.mimeData())
         if source is None:
             event.ignore()
@@ -174,28 +186,42 @@ class MainWindow(QMainWindow):
         self.load_source(source)
 
     def show_current_image(self) -> None:
+        if self._closing:
+            return
         self.presenter.show_current()
 
     def show_next_image(self) -> None:
+        if self._closing:
+            return
         if self.state.move_next():
             self.show_current_image()
 
     def show_previous_image(self) -> None:
+        if self._closing:
+            return
         if self.state.move_previous():
             self.show_current_image()
 
     def show_next_archive(self) -> None:
+        if self._closing:
+            return
         if self.state.move_next_archive():
             self.show_current_image()
 
     def show_previous_archive(self) -> None:
+        if self._closing:
+            return
         if self.state.move_previous_archive():
             self.show_current_image()
 
     def open_next_sibling_folder(self) -> None:
+        if self._closing:
+            return
         self._open_sibling_source(1)
 
     def open_previous_sibling_folder(self) -> None:
+        if self._closing:
+            return
         self._open_sibling_source(-1)
 
     def show_issues(self) -> None:
@@ -224,6 +250,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._closing = True
+        self.setAcceptDrops(False)
+        self.controls_panel.setEnabled(False)
+        self.image_view.setEnabled(False)
         self._restore_timer.stop()
         self._focus_timer.stop()
         self.overlays.stop()
@@ -353,6 +382,8 @@ class MainWindow(QMainWindow):
             self.load_source(context)
 
     def _open_sibling_source(self, step: int) -> None:
+        if self._closing:
+            return
         context = self.current_context
         if context is None:
             return
@@ -409,6 +440,8 @@ class MainWindow(QMainWindow):
         self.encoding_combo.blockSignals(blocked)
 
     def _encoding_changed(self) -> None:
+        if self._closing:
+            return
         encoding = self.encoding_combo.currentData()
         if encoding not in ("auto", "cp437", "cp949"):
             return
