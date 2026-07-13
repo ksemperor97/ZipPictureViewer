@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from zippictureviewer.folder_context import FolderContext
-from zippictureviewer.models import ImageEntry
+from zippictureviewer.models import ArchiveMemberId, ImageEntry
 from zippictureviewer.session_store import SESSION_VERSION, SessionStore
 
 
@@ -61,6 +61,83 @@ def test_save_position_keeps_the_legacy_three_argument_api(tmp_path: Path) -> No
 
     assert store.restore_index(root, [entry]) == 0
     assert store.last_root() == root
+
+
+def test_structured_member_id_restores_the_exact_duplicate_zip_record(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "collection"
+    root.mkdir()
+    archive = root / "duplicates.zip"
+    archive.touch()
+    first_duplicate = ImageEntry(
+        archive,
+        "page.jpg",
+        member_id=ArchiveMemberId(record_index=0, header_offset=10, crc=101),
+    )
+    saved_duplicate = ImageEntry(
+        archive,
+        "page.jpg",
+        member_id=ArchiveMemberId(record_index=1, header_offset=200, crc=202),
+    )
+    store = SessionStore(tmp_path / "session.json")
+
+    store.save_position(
+        root,
+        saved_duplicate,
+        1,
+        [first_duplicate, saved_duplicate],
+    )
+
+    saved_member_id = _read_json(store.path)["positions"][str(root)]["member_id"]
+    assert saved_member_id == {
+        "record_index": 1,
+        "header_offset": 200,
+        "crc": 202,
+    }
+    assert store.restore_index(root, [saved_duplicate, first_duplicate]) == 0
+
+
+def test_existing_version_2_string_member_id_matches_modern_entries(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "collection"
+    root.mkdir()
+    archive = root / "book.zip"
+    archive.touch()
+    context = FolderContext.from_path(root)
+    session_path = tmp_path / "session.json"
+    session_path.write_text(
+        json.dumps(
+            {
+                "version": SESSION_VERSION,
+                "last_root": context.to_dict(),
+                "positions": {
+                    context.session_key: {
+                        "container_id": "book.zip",
+                        "member_id": "page2.jpg",
+                        "container_index": 1,
+                        "global_index": 1,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    entries = [
+        ImageEntry(
+            archive,
+            "page1.jpg",
+            member_id=ArchiveMemberId(0, 10, 101),
+        ),
+        ImageEntry(
+            archive,
+            "page2.jpg",
+            member_id=ArchiveMemberId(1, 200, 202),
+        ),
+    ]
+
+    assert SessionStore(session_path).restore_index(context, entries) == 1
 
 
 def test_restore_prefers_nearest_item_in_the_same_container(

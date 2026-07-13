@@ -9,10 +9,11 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .folder_context import FolderContext, coerce_folder_context
-from .models import ImageEntry
+from .models import ArchiveMemberId, ImageEntry
 
 
 SESSION_VERSION = 2
+SerializedMemberId = str | dict[str, int]
 
 
 def app_support_dir() -> Path:
@@ -38,12 +39,12 @@ SESSION_FILE = APP_SUPPORT_DIR / "session.json"
 @dataclass(frozen=True)
 class SavedPosition:
     container_id: str
-    member_id: str
+    member_id: SerializedMemberId
     container_index: int | None
     global_index: int
 
-    def to_dict(self) -> dict[str, str | int]:
-        value: dict[str, str | int] = {
+    def to_dict(self) -> dict[str, object]:
+        value: dict[str, object] = {
             "container_id": self.container_id,
             "member_id": self.member_id,
             "global_index": self.global_index,
@@ -105,7 +106,7 @@ class SessionStore:
         )
         position = SavedPosition(
             container_id=self._container_id(context, entry.archive_path),
-            member_id=entry.member_name,
+            member_id=_serialize_member_id(entry),
             container_index=resolved_container_index,
             global_index=max(index, 0),
         )
@@ -149,7 +150,7 @@ class SessionStore:
     ) -> int | None:
         container_id = raw_position.get("container_id")
         member_id = raw_position.get("member_id")
-        if not isinstance(container_id, str) or not isinstance(member_id, str):
+        if not isinstance(container_id, str):
             return None
 
         matching_container: list[int] = []
@@ -157,7 +158,7 @@ class SessionStore:
             if self._container_id(context, entry.archive_path) != container_id:
                 continue
             matching_container.append(index)
-            if entry.member_name == member_id:
+            if _member_id_matches(entry, member_id):
                 return index
 
         if not matching_container:
@@ -337,3 +338,39 @@ def _resolve_for_identity(path: Path) -> Path:
         return Path(path).resolve(strict=False)
     except (OSError, RuntimeError):
         return Path(path)
+
+
+def _serialize_member_id(entry: ImageEntry) -> SerializedMemberId:
+    member_id = entry.member_id
+    if member_id is None:
+        return entry.member_name
+    return {
+        "record_index": member_id.record_index,
+        "header_offset": member_id.header_offset,
+        "crc": member_id.crc,
+    }
+
+
+def _member_id_matches(entry: ImageEntry, saved_member_id: object) -> bool:
+    if isinstance(saved_member_id, str):
+        return entry.member_name == saved_member_id
+
+    structured_id = _parse_archive_member_id(saved_member_id)
+    return structured_id is not None and entry.member_id == structured_id
+
+
+def _parse_archive_member_id(value: object) -> ArchiveMemberId | None:
+    if not isinstance(value, dict):
+        return None
+
+    record_index = value.get("record_index")
+    header_offset = value.get("header_offset")
+    crc = value.get("crc")
+    fields = (record_index, header_offset, crc)
+    if not all(isinstance(field, int) and not isinstance(field, bool) for field in fields):
+        return None
+    return ArchiveMemberId(
+        record_index=record_index,
+        header_offset=header_offset,
+        crc=crc,
+    )
