@@ -101,3 +101,26 @@ def test_get_image_never_decodes_and_rejects_a_stale_revision(
 
     assert cache.get_image(entry) is None
     assert cache.item_count == 0
+
+
+def test_atomic_same_size_same_mtime_replacement_invalidates_cache(
+    tmp_path: Path,
+    qapp,
+) -> None:
+    image_path = tmp_path / "page.png"
+    replacement = tmp_path / "replacement.png"
+    _cache_image_file(image_path, "red")
+    _cache_image_file(replacement, "blue")
+    assert replacement.stat().st_size == image_path.stat().st_size
+
+    entry = scan_image_index(tmp_path).entries[0]
+    cache = PixmapCache(max_bytes=1024)
+    assert cache.get_or_load_image(entry).pixelColor(0, 0) == QColor("red")
+    old_mtime = image_path.stat().st_mtime_ns
+    os.utime(replacement, ns=(old_mtime, old_mtime))
+    os.replace(replacement, image_path)
+
+    assert image_path.stat().st_mtime_ns == old_mtime
+    assert cache.get_image(entry) is None
+    new_entry = scan_image_index(tmp_path).entries[0]
+    assert cache.get_or_load_image(new_entry).pixelColor(0, 0) == QColor("blue")

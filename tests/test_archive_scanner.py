@@ -152,3 +152,16 @@ def test_scan_reports_generation_progress_and_cancellation(tmp_path: Path) -> No
     assert cancelled.generation == 43
     assert cancelled.cancelled is True
     assert cancelled.entries == []
+
+
+def test_scan_result_distinguishes_empty_and_unsupported_roots(
+    tmp_path: Path,
+) -> None:
+    empty_result = scan_image_index(tmp_path)
+    (tmp_path / "notes.txt").write_text("not an image", encoding="utf-8")
+    unsupported_result = scan_image_index(tmp_path)
+
+    assert empty_result.discovered_files == 0
+    assert unsupported_result.discovered_files == 1
+    assert unsupported_result.containers_scanned == 0
+    assert unsupported_result.entries == []

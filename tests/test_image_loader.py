@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import base64
+from dataclasses import replace
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QSize
 from PySide6.QtGui import QColor, QImage
 
+import zippictureviewer.image_loader as image_loader
 from zippictureviewer.archive_scanner import scan_image_index
 from zippictureviewer.image_loader import (
     ImageLoadError,
     ImageLoadLimits,
+    InvalidPasswordError,
+    PasswordRequiredError,
     ResourceLimitError,
+    UnsupportedEncryptionError,
     load_image,
     load_movie,
     read_image_bytes,
@@ -83,3 +89,65 @@ def test_load_image_returns_worker_safe_qimage(tmp_path: Path, qapp) -> None:
     assert isinstance(image, QImage)
     assert image.size().toTuple() == (3, 2)
     assert image.pixelColor(0, 0) == QColor("blue")
+
+
+def test_decoded_memory_limit_is_checked_before_reader_allocates(
+    tmp_path: Path,
+    qapp,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "large.png"
+    image_path.write_bytes(b"fake image data")
+    read_called = False
+
+    class FakeReader:
+        def __init__(self, _buffer) -> None:
+            pass
+
+        def setAutoTransform(self, _enabled: bool) -> None:  # noqa: N802
+            pass
+
+        def size(self) -> QSize:
+            return QSize(9000, 8000)
+
+        def setScaledSize(self, _size: QSize) -> None:  # noqa: N802
+            pass
+
+        def read(self) -> QImage:
+            nonlocal read_called
+            read_called = True
+            raise AssertionError("reader.read must not run past the memory preflight")
+
+    monkeypatch.setattr(image_loader, "QImageReader", FakeReader)
+
+    with pytest.raises(ResourceLimitError, match="Decoded memory"):
+        load_image(ImageEntry(tmp_path, image_path.name, source_kind="folder"))
+
+    assert not read_called
+
+
+def test_zipcrypto_password_is_session_supplied_and_aes_is_explicit(
+    tmp_path: Path,
+) -> None:
+    encrypted_zip = base64.b64decode(
+        "UEsDBAoACQAAAFi97Vxyo8w1LAAAACAAAAAIABwAcGFnZS5wbmdVVAkAA2j5VGpo"
+        "+VRqdXgLAAEE9QEAAAQUAAAAABDOj3sL8fFd4NdnJ8TqY2jWOhoO7hym8kaNAT1g"
+        "ZH3qsrs+IfdQl2V77UlQSwcIcqPMNSwAAAAgAAAAUEsBAh4DCgAJAAAAWL3tXHKj"
+        "zDUsAAAAIAAAAAgAGAAAAAAAAQAAAKSBAAAAAHBhZ2UucG5nVVQFAANo+VRqdXgL"
+        "AAEE9QEAAAQUAAAAUEsFBgAAAAABAAEATgAAAH4AAAAAAA=="
+    )
+    archive_path = tmp_path / "encrypted.zip"
+    archive_path.write_bytes(encrypted_zip)
+    entry = scan_image_index(archive_path).entries[0]
+
+    assert entry.encryption == "zipcrypto"
+    with pytest.raises(PasswordRequiredError):
+        read_image_bytes(entry)
+    with pytest.raises(InvalidPasswordError):
+        read_image_bytes(entry, password=b"wrong")
+    assert read_image_bytes(entry, password=b"secret") == (
+        b"not-an-image-but-decryption-test"
+    )
+
+    with pytest.raises(UnsupportedEncryptionError, match="AES-encrypted"):
+        read_image_bytes(replace(entry, encryption="aes"), password=b"secret")

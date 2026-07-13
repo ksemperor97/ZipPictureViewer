@@ -111,12 +111,16 @@ class PixmapCache:
         image: QImage,
         *,
         revision: ContainerRevision | None = None,
-    ) -> None:
+    ) -> bool:
         if image.isNull():
             raise ValueError("Cannot cache a null image")
 
         current_revision = current_source_revision(entry)
-        if revision is not None and revision != current_revision:
+        expected_revisions = (entry.source_revision, revision)
+        if any(
+            expected is not None and expected != current_revision
+            for expected in expected_revisions
+        ):
             raise SourceChangedError(f"Source changed before caching: {entry.source_path}")
         revision = current_revision
         source_key = _source_key(entry)
@@ -127,7 +131,7 @@ class PixmapCache:
             self._invalidate_stale_source(source_key, revision)
             self._remove(entry)
             if size_bytes > self.max_bytes:
-                return
+                return False
             self._items[entry] = _CacheItem(
                 image=stored_image,
                 revision=revision,
@@ -136,6 +140,7 @@ class PixmapCache:
             )
             self._total_bytes += size_bytes
             self._trim()
+            return True
 
     def get_or_load(self, entry: ImageEntry) -> QPixmap:
         """Return a GUI-thread QPixmap for compatibility with existing UI code."""

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from math import inf
 from zipfile import ZipFile, ZipInfo
 
-from PySide6.QtCore import QByteArray, QBuffer, QIODevice
+from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QSize, Qt
 from PySide6.QtGui import QImage, QImageReader, QMovie, QPixmap
 
 from .models import ContainerRevision, ImageEntry
@@ -25,10 +25,23 @@ class SourceChangedError(ImageLoadError):
     """Raised when an index entry no longer describes the source on disk."""
 
 
+class PasswordRequiredError(ImageLoadError):
+    """Raised when a traditional ZipCrypto member needs a password."""
+
+
+class InvalidPasswordError(ImageLoadError):
+    """Raised when a supplied ZipCrypto password cannot decrypt a member."""
+
+
+class UnsupportedEncryptionError(ImageLoadError):
+    """Raised for AES-encrypted ZIPs, which stdlib zipfile cannot decrypt."""
+
+
 @dataclass(frozen=True)
 class ImageLoadLimits:
     max_uncompressed_bytes: int = 256 * MEBIBYTE
     max_pixels: int = 100_000_000
+    max_decoded_bytes: int = 256 * MEBIBYTE
     compression_ratio_min_bytes: int = 64 * MEBIBYTE
     max_compression_ratio: float = 500.0
     movie_cache_max_bytes: int = 32 * MEBIBYTE
@@ -37,6 +50,7 @@ class ImageLoadLimits:
         integer_limits = (
             self.max_uncompressed_bytes,
             self.max_pixels,
+            self.max_decoded_bytes,
             self.compression_ratio_min_bytes,
             self.movie_cache_max_bytes,
         )
@@ -59,6 +73,8 @@ class MovieResource:
 def read_image_bytes(
     entry: ImageEntry,
     limits: ImageLoadLimits = DEFAULT_IMAGE_LIMITS,
+    *,
+    password: bytes | None = None,
 ) -> bytes:
     """Read one exact image member after checking cheap resource limits."""
 
@@ -70,14 +86,29 @@ def read_image_bytes(
         with image_path.open("rb") as image_file:
             image_bytes = _read_bounded(image_file, limits.max_uncompressed_bytes)
     else:
+        if entry.encryption == "aes":
+            raise UnsupportedEncryptionError(
+                f"AES-encrypted ZIP members are not supported: {entry.member_name}"
+            )
+        if entry.encryption == "zipcrypto" and password is None:
+            raise PasswordRequiredError(
+                f"A ZIP password is required: {entry.member_name}"
+            )
         with ZipFile(entry.archive_path) as archive:
             info = _resolve_archive_info(archive, entry)
             _validate_archive_member(info, limits)
-            with archive.open(info) as image_file:
-                image_bytes = _read_bounded(
-                    image_file,
-                    limits.max_uncompressed_bytes,
-                )
+            try:
+                with archive.open(info, pwd=password) as image_file:
+                    image_bytes = _read_bounded(
+                        image_file,
+                        limits.max_uncompressed_bytes,
+                    )
+            except RuntimeError as error:
+                if entry.encryption == "zipcrypto":
+                    raise InvalidPasswordError(
+                        f"The ZIP password is incorrect: {entry.member_name}"
+                    ) from error
+                raise
 
     _validate_source_revision(entry)
     return image_bytes
@@ -86,10 +117,13 @@ def read_image_bytes(
 def load_image(
     entry: ImageEntry,
     limits: ImageLoadLimits = DEFAULT_IMAGE_LIMITS,
+    *,
+    password: bytes | None = None,
+    scaled_size: QSize | None = None,
 ) -> QImage:
     """Decode to a QImage, which is safe to produce in a worker thread."""
 
-    image_bytes = read_image_bytes(entry, limits)
+    image_bytes = read_image_bytes(entry, limits, password=password)
     byte_array, buffer = _read_buffer(image_bytes)
     reader = QImageReader(buffer)
     reader.setAutoTransform(True)
@@ -97,6 +131,15 @@ def load_image(
     size = reader.size()
     if size.isValid():
         _validate_pixel_count(size.width(), size.height(), entry.member_name, limits)
+        decode_size = _bounded_decode_size(size, scaled_size)
+        _validate_decoded_bytes(
+            decode_size.width(),
+            decode_size.height(),
+            entry.member_name,
+            limits,
+        )
+        if decode_size != size:
+            reader.setScaledSize(decode_size)
 
     image = reader.read()
     if image.isNull():
@@ -104,6 +147,7 @@ def load_image(
         suffix = f" ({detail})" if detail else ""
         raise ImageLoadError(f"Cannot load image: {entry.member_name}{suffix}")
     _validate_pixel_count(image.width(), image.height(), entry.member_name, limits)
+    _validate_decoded_bytes(image.width(), image.height(), entry.member_name, limits)
 
     # byte_array and buffer stay local through reader.read(); QImage owns the
     # decoded pixels after this point.
@@ -113,17 +157,21 @@ def load_image(
 def load_pixmap(
     entry: ImageEntry,
     limits: ImageLoadLimits = DEFAULT_IMAGE_LIMITS,
+    *,
+    password: bytes | None = None,
 ) -> QPixmap:
     """GUI-thread compatibility wrapper around :func:`load_image`."""
 
-    return QPixmap.fromImage(load_image(entry, limits))
+    return QPixmap.fromImage(load_image(entry, limits, password=password))
 
 
 def load_movie(
     entry: ImageEntry,
     limits: ImageLoadLimits = DEFAULT_IMAGE_LIMITS,
+    *,
+    password: bytes | None = None,
 ) -> MovieResource:
-    image_bytes = read_image_bytes(entry, limits)
+    image_bytes = read_image_bytes(entry, limits, password=password)
     return create_movie_resource(image_bytes, entry.member_name, limits)
 
 
@@ -145,6 +193,12 @@ def create_movie_resource(
     if first_frame.isNull():
         raise ImageLoadError(f"Cannot load animation: {member_name}")
     _validate_pixel_count(
+        first_frame.width(),
+        first_frame.height(),
+        member_name,
+        limits,
+    )
+    _validate_decoded_bytes(
         first_frame.width(),
         first_frame.height(),
         member_name,
@@ -194,7 +248,7 @@ def _validate_source_revision(entry: ImageEntry) -> None:
     if expected is None:
         return
     current = current_source_revision(entry)
-    if (current.mtime_ns, current.size) != (expected.mtime_ns, expected.size):
+    if current != expected:
         raise SourceChangedError(f"Source changed since it was scanned: {current.path}")
 
 
@@ -237,9 +291,22 @@ def _validate_pixel_count(
         )
 
 
-def _read_bounded(source: object, max_bytes: int) -> bytes:
-    read = getattr(source, "read")
-    data = read(max_bytes + 1)
+def _validate_decoded_bytes(
+    width: int,
+    height: int,
+    member_name: str,
+    limits: ImageLoadLimits,
+) -> None:
+    estimated_bytes = width * height * 4
+    if estimated_bytes > limits.max_decoded_bytes:
+        raise ResourceLimitError(
+            f"Decoded memory for {member_name} is about {estimated_bytes} bytes; "
+            f"limit is {limits.max_decoded_bytes} bytes"
+        )
+
+
+def _read_bounded(source, max_bytes: int) -> bytes:
+    data = source.read(max_bytes + 1)
     if len(data) > max_bytes:
         raise ResourceLimitError(
             f"Decoded data exceeds the {max_bytes}-byte safety limit"
@@ -253,3 +320,17 @@ def _read_buffer(image_bytes: bytes) -> tuple[QByteArray, QBuffer]:
     if not buffer.open(QIODevice.OpenModeFlag.ReadOnly):
         raise ImageLoadError("Cannot open image buffer")
     return byte_array, buffer
+
+
+def _bounded_decode_size(source_size: QSize, requested_size: QSize | None) -> QSize:
+    if requested_size is None or not requested_size.isValid():
+        return source_size
+    if (
+        source_size.width() <= requested_size.width()
+        and source_size.height() <= requested_size.height()
+    ):
+        return source_size
+    return source_size.scaled(
+        requested_size,
+        Qt.AspectRatioMode.KeepAspectRatio,
+    )

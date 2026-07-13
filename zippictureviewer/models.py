@@ -12,6 +12,9 @@ class ContainerRevision:
     path: Path
     mtime_ns: int
     size: int
+    device: int = 0
+    inode: int = 0
+    ctime_ns: int = 0
 
     @classmethod
     def from_path(cls, path: Path) -> ContainerRevision:
@@ -21,6 +24,9 @@ class ContainerRevision:
             path=source_path,
             mtime_ns=stat_result.st_mtime_ns,
             size=stat_result.st_size,
+            device=stat_result.st_dev,
+            inode=stat_result.st_ino,
+            ctime_ns=stat_result.st_ctime_ns,
         )
 
 
@@ -40,6 +46,7 @@ class ImageEntry:
     member_id: ArchiveMemberId | None = None
     source_revision: ContainerRevision | None = None
     source_kind: Literal["archive", "folder"] | None = None
+    encryption: Literal["zipcrypto", "aes"] | None = None
 
     @property
     def archive_label(self) -> str:
@@ -85,3 +92,5 @@ class ScanResult:
     issues: list[ScanIssue] = field(default_factory=list)
     cancelled: bool = False
     generation: int = 0
+    discovered_files: int = 0
+    containers_scanned: int = 0

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Callable
-from zipfile import BadZipFile
+from zipfile import BadZipFile, ZipInfo
 
 from .archive_metadata import (
     MetadataEncoding,
@@ -28,17 +28,17 @@ ProgressCallback = Callable[[Path, int], None]
 
 
 def find_archives(root: Path) -> list[Path]:
-    containers, _, _ = _discover_containers(Path(root))
+    containers, _, _, _ = _discover_containers(Path(root))
     return [path for path in containers if _is_archive_path(path)]
 
 
 def find_image_folders(root: Path) -> list[Path]:
-    containers, _, _ = _discover_containers(Path(root))
+    containers, _, _, _ = _discover_containers(Path(root))
     return [path for path in containers if not _is_archive_path(path)]
 
 
 def find_image_containers(root: Path) -> list[Path]:
-    containers, _, _ = _discover_containers(Path(root))
+    containers, _, _, _ = _discover_containers(Path(root))
     return containers
 
 
@@ -85,8 +85,16 @@ def scan_image_index(
 
     root = Path(root)
     options = options or ScanOptions()
-    containers, issues, cancelled = _discover_containers(root, cancel_check)
-    result = ScanResult(issues=issues, cancelled=cancelled, generation=generation)
+    containers, issues, cancelled, discovered_files = _discover_containers(
+        root,
+        cancel_check,
+    )
+    result = ScanResult(
+        issues=issues,
+        cancelled=cancelled,
+        generation=generation,
+        discovered_files=discovered_files,
+    )
     if cancelled:
         return result
 
@@ -109,6 +117,7 @@ def scan_image_index(
 
         if progress_callback is not None:
             progress_callback(container_path, processed_count)
+        result.containers_scanned = processed_count
 
     return result
 
@@ -122,21 +131,22 @@ def build_image_index(root: Path) -> list[ImageEntry]:
 def _discover_containers(
     root: Path,
     cancel_check: CancelCheck | None = None,
-) -> tuple[list[Path], list[ScanIssue], bool]:
+) -> tuple[list[Path], list[ScanIssue], bool, int]:
     issues: list[ScanIssue] = []
     if not root.exists():
         error = FileNotFoundError(f"Root does not exist: {root}")
-        return [], [_issue_for(root, "discover", error)], False
+        return [], [_issue_for(root, "discover", error)], False, 0
 
     if root.is_file():
-        return ([root] if _is_archive_path(root) else []), issues, False
+        return ([root] if _is_archive_path(root) else []), issues, False, 1
     if not root.is_dir():
         error = OSError(f"Root is not a directory or supported archive: {root}")
-        return [], [_issue_for(root, "discover", error)], False
+        return [], [_issue_for(root, "discover", error)], False, 0
 
     archives: list[Path] = []
     image_folders: list[Path] = []
     cancelled = False
+    discovered_files = 0
 
     def collect_walk_error(error: OSError) -> None:
         target = Path(error.filename) if error.filename else root
@@ -148,6 +158,7 @@ def _discover_containers(
             break
 
         directory_path = Path(directory)
+        discovered_files += len(filenames)
         if any(_is_image_member(name) for name in filenames):
             image_folders.append(directory_path)
         archives.extend(
@@ -158,7 +169,7 @@ def _discover_containers(
 
     containers = [*archives, *image_folders]
     containers = natural_sorted(containers, key=lambda path: path.relative_to(root))
-    return containers, issues, cancelled
+    return containers, issues, cancelled, discovered_files
 
 
 def _scan_archive(
@@ -178,6 +189,7 @@ def _scan_archive(
             ),
             source_revision=revision,
             source_kind="archive",
+            encryption=_archive_encryption(info),
         )
         for record_index, info in enumerate(infos)
         if not info.is_dir() and _is_image_member(info.filename)
@@ -255,6 +267,25 @@ def _is_image_member(member_name: str) -> bool:
     if path.name.startswith("."):
         return False
     return path.suffix.casefold() in IMAGE_EXTENSIONS
+
+
+def _archive_encryption(info: ZipInfo) -> str | None:
+    if not info.flag_bits & 0x1:
+        return None
+    if info.compress_type == 99 or _has_extra_field(info.extra, 0x9901):
+        return "aes"
+    return "zipcrypto"
+
+
+def _has_extra_field(extra: bytes, field_id: int) -> bool:
+    offset = 0
+    while offset + 4 <= len(extra):
+        current_id = int.from_bytes(extra[offset : offset + 2], "little")
+        field_size = int.from_bytes(extra[offset + 2 : offset + 4], "little")
+        if current_id == field_id:
+            return True
+        offset += 4 + field_size
+    return False
 
 
 _ARCHIVE_ERRORS = (
