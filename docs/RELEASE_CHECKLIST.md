@@ -72,6 +72,7 @@ profile이 없으면 빌드를 시작하지 않고 실패한다.
 
 - [ ] workflow artifact와 GitHub Release에 ZIP과 `.sha256`이 모두 있다.
 - [ ] 체크섬을 독립적으로 확인했다.
+- [ ] packaging workflow의 macOS·Windows `scan-benchmark-*.json`이 10,000개 이미지를 모두 인덱싱하고 오류 0개를 기록했다.
 
 ```bash
 shasum -a 256 -c ZipPictureViewer-vX.Y.Z-mac-arm64-slim.zip.sha256
@@ -102,5 +103,7 @@ macOS 13 launch check:
 Windows workflow run:
 Windows artifact SHA-256:
 Windows 10/11 launch check:
+macOS scan benchmark artifact:
+Windows scan benchmark artifact:
 Known limitations:
 ```

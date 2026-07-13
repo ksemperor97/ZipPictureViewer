@@ -38,9 +38,18 @@ from scripts.check_windows_bundle import (
     check_bundle_layout,
     expected_archive_name,
 )
+from scripts.benchmark_scan import benchmark
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_synthetic_scan_benchmark_indexes_the_requested_corpus() -> None:
+    metrics = benchmark(archives=3, images_per_archive=2)
+
+    assert metrics["expected_images"] == 6
+    assert metrics["indexed_images"] == 6
+    assert metrics["issues"] == 0
 
 
 def create_distribution_metadata(bundle_root: Path, version: str) -> Path:
@@ -259,6 +268,9 @@ def test_ci_checks_requested_tag_and_runs_tests_before_build() -> None:
     packaging_workflow = (PROJECT_ROOT / ".github/workflows/packaging-ci.yml").read_text(
         encoding="utf-8"
     )
+    assert "scripts/benchmark_scan.py" in packaging_workflow
+    assert "scan-benchmark-macos.json" in packaging_workflow
+    assert "scan-benchmark-windows.json" in packaging_workflow
 
     assert "ref: ${{ inputs.tag_name }}" in windows_release_workflow
     assert "--tag $env:REQUESTED_TAG --verify-head" in windows_release_workflow
