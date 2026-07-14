@@ -293,6 +293,70 @@ def test_narrow_window_keeps_controls_and_file_info_usable(
     window.close()
 
 
+def test_controls_default_to_five_buttons_and_expand_in_place(
+    qtbot,
+    monkeypatch,
+) -> None:
+    window = _make_window(qtbot, monkeypatch)
+    window._set_overlays_visible(True)
+    window.viewer_surface.position_floating_panels()
+
+    visible_buttons = {
+        name
+        for name in window.controls_panel.button_names
+        if getattr(window.controls_panel, name).isVisible()
+    }
+    assert visible_buttons == set(window.controls_panel.compact_button_names)
+    assert window.controls_panel.compact_button_names == (
+        "open_button",
+        "previous_button",
+        "next_button",
+        "close_button",
+        "expand_button",
+    )
+    assert not window.controls_panel.expanded
+    assert not window.status_label.isVisible()
+    assert not window.encoding_combo.isVisible()
+
+    window.expand_button.click()
+
+    assert window.controls_panel.expanded
+    assert window.expand_button.text() == "접기"
+    assert all(
+        getattr(window.controls_panel, name).isVisible()
+        for name in window.controls_panel.button_names
+    )
+    assert window.status_label.isVisible()
+    assert window.encoding_combo.isVisible()
+    assert window.viewer_surface.rect().contains(window.controls_panel.geometry())
+
+    window.expand_button.click()
+
+    assert not window.controls_panel.expanded
+    assert window.expand_button.text() == "펼치기"
+    assert not window.controls_panel.secondary_panel.isVisible()
+    window.close()
+
+
+def test_expanded_controls_remain_inside_a_480_pixel_window(
+    qtbot,
+    monkeypatch,
+) -> None:
+    window = _make_window(qtbot, monkeypatch)
+    window.resize(480, 360)
+    window._set_overlays_visible(True)
+
+    window.expand_button.click()
+    window.viewer_surface.position_floating_panels()
+
+    assert window.viewer_surface.rect().contains(window.controls_panel.geometry())
+    visible_buttons = [
+        button for button in window.controls_panel.buttons() if button.isVisible()
+    ]
+    assert min(button.width() for button in visible_buttons) >= 52
+    window.close()
+
+
 def test_combo_up_key_is_not_taken_by_archive_navigation_shortcut(
     qtbot,
     monkeypatch,

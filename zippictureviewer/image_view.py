@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QMovie, QPainter, QPixmap, QResizeEvent, QWheelEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QGraphicsPixmapItem,
     QGraphicsScene,
@@ -39,6 +40,8 @@ class ImageView(QGraphicsView):
         self._movie_frame_size = QSize()
         self._fit_mode = True
         self._window_drag_offset: QPoint | None = None
+        self._window_drag_origin: QPoint | None = None
+        self._manual_window_drag = False
 
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -201,7 +204,10 @@ class ImageView(QGraphicsView):
             and event.button() == Qt.MouseButton.LeftButton
             and not window.isFullScreen()
         ):
-            self._window_drag_offset = event.globalPosition().toPoint() - window.pos()
+            global_position = event.globalPosition().toPoint()
+            self._window_drag_offset = global_position - window.pos()
+            self._window_drag_origin = global_position
+            self._manual_window_drag = False
             event.accept()
             return
         super().mousePressEvent(event)
@@ -211,14 +217,43 @@ class ImageView(QGraphicsView):
             self._window_drag_offset is not None
             and event.buttons() & Qt.MouseButton.LeftButton
         ):
-            self.window().move(event.globalPosition().toPoint() - self._window_drag_offset)
+            global_position = event.globalPosition().toPoint()
+            if not self._manual_window_drag:
+                origin = self._window_drag_origin
+                if (
+                    origin is None
+                    or (global_position - origin).manhattanLength()
+                    < QApplication.startDragDistance()
+                ):
+                    event.accept()
+                    return
+
+                offset = self._window_drag_offset
+                self._clear_window_drag()
+                if self._start_system_window_move():
+                    event.accept()
+                    return
+                self._window_drag_offset = offset
+                self._window_drag_origin = origin
+                self._manual_window_drag = True
+
+            self.window().move(global_position - self._window_drag_offset)
             event.accept()
             return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        self._window_drag_offset = None
+        self._clear_window_drag()
         super().mouseReleaseEvent(event)
+
+    def _start_system_window_move(self) -> bool:
+        window_handle = self.window().windowHandle()
+        return bool(window_handle is not None and window_handle.startSystemMove())
+
+    def _clear_window_drag(self) -> None:
+        self._window_drag_offset = None
+        self._window_drag_origin = None
+        self._manual_window_drag = False
 
     def _zoom_by(self, factor: float) -> None:
         if self._pixmap_item.pixmap().isNull():

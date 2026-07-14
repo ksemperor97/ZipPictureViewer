@@ -82,6 +82,9 @@ class MainWindow(QMainWindow):
             self.controls_panel,
             self.info_panel,
         )
+        self.controls_panel.layout_changed.connect(
+            self.viewer_surface.position_floating_panels
+        )
         self.setCentralWidget(self.viewer_surface)
         self.overlays = OverlayController(
             self.viewer_surface,

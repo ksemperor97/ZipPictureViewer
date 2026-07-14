@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QMenu,
     QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 from .viewer_widgets import FloatingPanel
@@ -56,15 +58,21 @@ class ElidingLabel(QLabel):
 class ViewerControls(FloatingPanel):
     """Responsive command surface kept separate from viewer orchestration."""
 
-    button_names = (
+    layout_changed = Signal()
+
+    compact_button_names = (
         "open_button",
+        "previous_button",
+        "next_button",
+        "close_button",
+        "expand_button",
+    )
+    secondary_button_names = (
         "open_archive_button",
         "previous_folder_button",
         "next_folder_button",
         "refresh_button",
         "previous_archive_button",
-        "previous_button",
-        "next_button",
         "next_archive_button",
         "issues_button",
         "fit_button",
@@ -75,8 +83,8 @@ class ViewerControls(FloatingPanel):
         "help_button",
         "cancel_scan_button",
         "minimize_button",
-        "close_button",
     )
+    button_names = compact_button_names + secondary_button_names
 
     def __init__(self) -> None:
         super().__init__()
@@ -99,6 +107,7 @@ class ViewerControls(FloatingPanel):
         self.cancel_scan_button = QPushButton("스캔 취소")
         self.minimize_button = QPushButton("최소화")
         self.close_button = QPushButton("닫기")
+        self.expand_button = QPushButton("펼치기")
         self.status_label = QLabel("폴더 또는 ZIP 열기")
         self.encoding_combo = QComboBox()
         self.encoding_combo.addItem("ZIP 이름: 자동", "auto")
@@ -106,7 +115,10 @@ class ViewerControls(FloatingPanel):
         self.encoding_combo.addItem("ZIP 이름: CP437", "cp437")
         self.encoding_combo.setToolTip("현재 루트의 ZIP 파일명 인코딩")
         self.encoding_combo.setMinimumWidth(126)
+        self._expanded = True
         self._build_layout()
+        self.expand_button.clicked.connect(self.toggle_expanded)
+        self.set_expanded(False)
         self.set_scanning(False)
         self.set_issue_count(0)
 
@@ -123,46 +135,75 @@ class ViewerControls(FloatingPanel):
         self.issues_button.setText(f"오류 {count}")
         self.issues_button.setEnabled(count > 0)
 
-    def _build_layout(self) -> None:
-        layout = QGridLayout()
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setHorizontalSpacing(6)
-        layout.setVerticalSpacing(6)
+    @property
+    def expanded(self) -> bool:
+        return self._expanded
 
-        rows = (
+    def toggle_expanded(self) -> None:
+        self.set_expanded(not self._expanded)
+
+    def set_expanded(self, expanded: bool) -> None:
+        if self._expanded == expanded:
+            return
+        self._expanded = expanded
+        self.secondary_panel.setVisible(expanded)
+        self.expand_button.setText("접기" if expanded else "펼치기")
+        self.updateGeometry()
+        self.adjustSize()
+        self.layout_changed.emit()
+
+    def _build_layout(self) -> None:
+        layout = QVBoxLayout()
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
+
+        compact_layout = QHBoxLayout()
+        compact_layout.setContentsMargins(0, 0, 0, 0)
+        compact_layout.setSpacing(6)
+        for name in self.compact_button_names:
+            compact_layout.addWidget(getattr(self, name))
+        layout.addLayout(compact_layout)
+
+        self.secondary_panel = QWidget()
+        secondary_layout = QGridLayout(self.secondary_panel)
+        secondary_layout.setContentsMargins(0, 0, 0, 0)
+        secondary_layout.setHorizontalSpacing(6)
+        secondary_layout.setVerticalSpacing(6)
+        secondary_rows = (
             (
-                self.open_button,
                 self.open_archive_button,
                 self.previous_folder_button,
                 self.next_folder_button,
                 self.refresh_button,
+                self.cancel_scan_button,
             ),
             (
                 self.previous_archive_button,
-                self.previous_button,
-                self.next_button,
                 self.next_archive_button,
                 self.issues_button,
-            ),
-            (
                 self.fit_button,
                 self.actual_size_button,
+            ),
+            (
                 self.zoom_out_button,
                 self.zoom_in_button,
                 self.fullscreen_button,
+                self.help_button,
+                self.minimize_button,
             ),
         )
-        for row, widgets in enumerate(rows):
+        for row, widgets in enumerate(secondary_rows):
             for column, widget in enumerate(widgets):
-                layout.addWidget(widget, row, column)
+                secondary_layout.addWidget(widget, row, column)
 
-        layout.addWidget(self.cancel_scan_button, 3, 0)
-        layout.addWidget(self.encoding_combo, 3, 1, 1, 2)
-        layout.addWidget(self.minimize_button, 3, 3)
-        layout.addWidget(self.close_button, 3, 4)
+        secondary_layout.addWidget(self.encoding_combo, 3, 0, 1, 2)
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.status_label, 4, 0, 1, 4)
-        layout.addWidget(self.help_button, 4, 4)
+        self.status_label.setStyleSheet(
+            "background-color: rgba(24, 24, 27, 235); "
+            "border-radius: 4px; padding: 4px 8px;"
+        )
+        secondary_layout.addWidget(self.status_label, 3, 2, 1, 3)
+        layout.addWidget(self.secondary_panel)
         self.setLayout(layout)
 
 
