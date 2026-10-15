@@ -178,3 +178,14 @@ dist/ZipPictureViewer-v1.1.0-windows-x64.zip.sha256
 - Linux: `${XDG_CONFIG_HOME:-~/.config}/ZipPictureViewer/session.json`
 
 세션 파일은 임시 파일에 먼저 기록한 뒤 원자적으로 교체합니다. 심볼릭 링크로 연 루트는 논리 경로 문맥을 유지하고, 저장된 항목이 사라지면 같은 컨테이너의 가장 가까운 항목부터 복원합니다.
+
+## Workspace Python environment
+
+This checkout uses the shared `/Users/sjk/Workspace/.venv` environment
+(Python 3.12, PySide6 6.11.0). The project `.venv` is a symbolic link; do not
+recreate it with `python -m venv`. Activate the shared environment with
+`source /Users/sjk/Workspace/.venv/bin/activate`. Existing `.venv/bin/python`
+commands continue to work. Rebuild the workspace environment with
+`/Users/sjk/Workspace/setup-python.sh`; its root `requirements-lock.txt` records
+the common package versions. This setup supersedes the per-project environment
+creation steps elsewhere in this README.
