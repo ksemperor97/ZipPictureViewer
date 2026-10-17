@@ -46,6 +46,7 @@ class AutomationCommands:
         modal = QApplication.activeModalWidget()
         return {
             "visible": window.isVisible(),
+            "active": window.isActiveWindow(),
             "fullscreen": window.isFullScreen(),
             "source": str(context.logical_path) if context else None,
             "source_kind": context.source_kind if context else None,
@@ -80,6 +81,13 @@ class AutomationCommands:
         image = viewport.grab().toImage()
         point = QPoint(int((image.width() - 1) * x), int((image.height() - 1) * y))
         return image.pixelColor(point).name()
+
+    def cmd_activate(self) -> bool:
+        """Bring the window to the front, as a user clicking it would."""
+
+        self.window.raise_()
+        self.window.activateWindow()
+        return self.window.isActiveWindow()
 
     def cmd_key(self, key: str, modifiers: tuple[str, ...] = ()) -> bool:
         qt_key = getattr(Qt.Key, f"Key_{key}")

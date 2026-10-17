@@ -98,6 +98,11 @@ class ViewerApp:
         return self.wait_for(lambda s: not s["scanning"], "scan to finish")
 
     def key(self, key: str, *modifiers: str) -> None:
+        # Window shortcuts only fire in the active window; a freshly launched
+        # or backgrounded app has to be brought forward first, like a click.
+        if not self.state()["active"]:
+            self.call("activate")
+            self.wait_for(lambda s: s["active"], "window activation")
         self.call("key", key=key, modifiers=list(modifiers))
 
     def drop(self, *paths: Path, x: float = 0.5, y: float = 0.5) -> bool:
