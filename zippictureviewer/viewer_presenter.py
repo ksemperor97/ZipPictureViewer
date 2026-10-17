@@ -103,15 +103,16 @@ class ImagePresenter(QObject):
 
     def request_full_resolution(self) -> None:
         entry = self.state.current_entry
-        if (
-            self._closing
-            or entry is None
-            or entry.is_animated
-            or self._full_resolution_current == entry
-        ):
+        if self._closing or entry is None or entry.is_animated:
             return
         self._resize_timer.stop()
         self._zoom_timer.stop()
+        if self._full_resolution_current == entry:
+            # Nothing to decode, but a fit preview still in flight must not
+            # land afterwards and snap the view back to fit.
+            self.controller.invalidate_display()
+            self.decoder.clear_queued()
+            return
         token = self.controller.begin_display()
         if token is None:
             return
