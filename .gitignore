@@ -7,3 +7,5 @@ build/
 *.egg-info/
 assets/*.iconset/
 AGENTS.md
+.venv
+.DS_Store
