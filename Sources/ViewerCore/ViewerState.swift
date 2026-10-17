@@ -13,6 +13,10 @@ public struct ViewerState {
     public var currentEntry: ImageEntry? { entries.isEmpty ? nil : entries[currentIndex] }
     public var positionLabel: String { entries.isEmpty ? "0 / 0" : "\(currentIndex + 1) / \(entries.count)" }
     public var hasMultipleBundles: Bool { bundleStarts.count > 1 }
+    public var isAtFirstEntry: Bool { currentIndex == 0 }
+    public var isAtLastEntry: Bool { !entries.isEmpty && currentIndex == entries.count - 1 }
+    public var isInFirstBundle: Bool { currentBundle == 0 }
+    public var isInLastBundle: Bool { currentBundle == bundleStarts.count - 1 }
 
     public mutating func setEntries(_ newEntries: [ImageEntry], currentIndex index: Int) {
         entries = newEntries
