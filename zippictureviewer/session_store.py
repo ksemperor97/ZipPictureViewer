@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -14,6 +15,7 @@ from .folder_context import FolderContext, coerce_folder_context
 from .models import ArchiveMemberId, ImageEntry
 
 
+_log = logging.getLogger(__name__)
 SESSION_VERSION = 2
 SerializedMemberId = str | dict[str, int]
 
@@ -257,7 +259,9 @@ class SessionStore:
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 lock_stream = self.path.with_name(f".{self.path.name}.lock").open("a+b")
-            except OSError:
+            except OSError as exc:
+                # The write below fails the same way and is logged there.
+                _log.debug("Cannot lock session file %s: %s", self.path, exc)
                 yield
                 return
 
@@ -318,35 +322,33 @@ class SessionStore:
         return migrated
 
     def _write(self, data: dict[str, Any]) -> None:
+        # Losing a saved position must not interrupt viewing, so write failures
+        # are logged rather than raised.
+        payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
         try:
-            payload = json.dumps(data, ensure_ascii=False, indent=2)
             self.path.parent.mkdir(parents=True, exist_ok=True)
             descriptor, temporary_name = tempfile.mkstemp(
                 dir=self.path.parent,
                 prefix=f".{self.path.name}.",
                 suffix=".tmp",
             )
-        except OSError:
+        except OSError as exc:
+            _log.warning("Cannot save session to %s: %s", self.path, exc)
             return
 
         temporary_path = Path(temporary_name)
         try:
+            # fdopen owns the descriptor from here on and closes it even when
+            # writing fails, so it must never be closed a second time.
             with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
                 stream.write(payload)
-                stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary_path, self.path)
-        except OSError:
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
+        except OSError as exc:
+            _log.warning("Cannot save session to %s: %s", self.path, exc)
         finally:
-            try:
-                temporary_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+            temporary_path.unlink(missing_ok=True)
 
 
 def _empty_session() -> dict[str, Any]:

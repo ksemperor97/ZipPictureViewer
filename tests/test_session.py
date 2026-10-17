@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sys
 
+import pytest
+
 from media import BLUE, GREEN, RED, write_book
 
 
@@ -87,3 +89,24 @@ def test_missing_saved_folder_starts_empty(launch_app, tmp_path) -> None:
     state = launch_app().state()
     assert state["source"] is None
     assert state["message"] == "폴더 열기 또는 드래그"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory permissions")
+def test_read_only_settings_folder_does_not_stop_viewing(
+    launch_app,
+    config_dir,
+    tmp_path,
+) -> None:
+    library = tmp_path / "library"
+    write_book(library / "vol1.zip", [RED, GREEN])
+    config_dir.chmod(0o500)
+    try:
+        app = launch_app()
+        app.drop(library)
+        app.wait_for_image("vol1.zip", "p1.png")
+        app.key("Right")
+        app.wait_for_image("vol1.zip", "p2.png")
+        assert app.close() == 0
+    finally:
+        config_dir.chmod(0o700)
+    assert "Cannot save session" in app.log_tail(200)
