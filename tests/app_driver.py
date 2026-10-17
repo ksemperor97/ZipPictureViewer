@@ -103,8 +103,8 @@ class ViewerApp:
             f"{archive} | {member} to be displayed",
         )
 
-    def wait_for_idle(self) -> dict[str, Any]:
-        return self.wait_for(lambda s: not s["scanning"], "scan to finish")
+    def wait_for_idle(self, timeout: float = DEFAULT_TIMEOUT) -> dict[str, Any]:
+        return self.wait_for(lambda s: not s["scanning"], "scan to finish", timeout)
 
     def key(self, key: str, *modifiers: str) -> None:
         self._ensure_active()
