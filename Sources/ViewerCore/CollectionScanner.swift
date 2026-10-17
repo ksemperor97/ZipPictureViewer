@@ -8,6 +8,8 @@ public struct ScanOptions: Sendable {
     public var priorityContainer: URL?
     public var zipLimits = ZipLimits()
     public var maxIndexEntries = 100_000
+    /// Pause after each container; emulates a slow drive in tests.
+    public var containerDelay: TimeInterval = 0
 
     public init() {}
 
@@ -58,6 +60,9 @@ public enum CollectionScanner {
             if case .success(let entries) = outcome { indexedCount += entries.count }
             outcomes[index] = outcome
             progress(containers[index], step + 1)
+            if options.containerDelay > 0 {
+                Thread.sleep(forTimeInterval: options.containerDelay)
+            }
 
             // The shown container and its two neighbours go out at once so
             // ↑/↓ work immediately; after that a few snapshots per second.
