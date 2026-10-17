@@ -24,8 +24,18 @@ def config_dir(tmp_path: Path) -> Path:
 def launch_app(tmp_path: Path, config_dir: Path) -> Iterator[LaunchApp]:
     apps: list[ViewerApp] = []
 
-    def launch(*args: str | Path, env: dict[str, str] | None = None) -> ViewerApp:
-        app = ViewerApp(tmp_path, config_dir, [str(arg) for arg in args], env)
+    def launch(
+        *args: str | Path,
+        env: dict[str, str] | None = None,
+        finder_files: list[Path] | None = None,
+    ) -> ViewerApp:
+        app = ViewerApp(
+            tmp_path,
+            config_dir,
+            [str(arg) for arg in args],
+            env,
+            finder_files,
+        )
         apps.append(app)
         return app.start()
 

@@ -140,11 +140,11 @@ def test_help_and_issue_windows_open(launch_app, tmp_path) -> None:
     (tmp_path / "collection" / "broken.zip").write_bytes(b"not a zip")
     write_png(tmp_path / "collection" / "ok.png", RED)
     app = launch_app()
-    app.key("Question")
-    app.wait_for(lambda s: "단축키" in " ".join(s["dialogs"]), "shortcut help")
-
     app.drop(tmp_path / "collection")
     app.wait_for_image("collection", "ok.png")
+
+    app.key("Question")
+    app.wait_for(lambda s: "단축키 도움말" in s["dialogs"], "shortcut help")
     app.click("expand_button")
     app.click("issues_button")
     app.wait_for(lambda s: "읽지 못한 항목" in s["dialogs"], "issue window")

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import signal
 import subprocess
 import sys
 import time
@@ -36,11 +37,14 @@ class ViewerApp:
         config_dir: Path,
         args: list[str],
         extra_env: dict[str, str] | None = None,
+        finder_files: list[Path] | None = None,
     ) -> None:
         self.work_dir = work_dir
         self.config_dir = config_dir
         self.args = args
         self.extra_env = extra_env or {}
+        self.finder_files = finder_files
+        self.app_pid: int | None = None
         self.log_path = work_dir / "app.log"
         self.process: subprocess.Popen | None = None
         self._connection = None
@@ -52,11 +56,16 @@ class ViewerApp:
         env["ZIP_PICTURE_VIEWER_CONFIG_DIR"] = str(self.config_dir)
         env["ZIP_PICTURE_VIEWER_AUTOMATION_KEY"] = key
         env.update(self.extra_env)
-        command = [*app_command(), "--automation-handshake", str(handshake), *self.args]
+        app_arguments = ["--automation-handshake", str(handshake), *self.args]
+        if self.finder_files is None:
+            command = [*app_command(), *app_arguments]
+        else:
+            command = _launch_services_command(self.finder_files, env, app_arguments)
         with self.log_path.open("ab") as log:
             self.process = subprocess.Popen(command, env=env, stdout=log, stderr=log)
         port = self._wait_for_handshake(handshake)
         self._connection = Client(("127.0.0.1", port), authkey=bytes.fromhex(key))
+        self._ensure_active()
         return self
 
     def call(self, name: str, **params: Any) -> Any:
@@ -98,12 +107,16 @@ class ViewerApp:
         return self.wait_for(lambda s: not s["scanning"], "scan to finish")
 
     def key(self, key: str, *modifiers: str) -> None:
-        # Window shortcuts only fire in the active window; a freshly launched
-        # or backgrounded app has to be brought forward first, like a click.
+        self._ensure_active()
+        self.call("key", key=key, modifiers=list(modifiers))
+
+    def _ensure_active(self) -> None:
+        # Window shortcuts only fire in the active window. macOS may hand
+        # activation to another app (for example after the previous test's
+        # app quits), so bring the window forward first, like a user's click.
         if not self.state()["active"]:
             self.call("activate")
             self.wait_for(lambda s: s["active"], "window activation")
-        self.call("key", key=key, modifiers=list(modifiers))
 
     def drop(self, *paths: Path, x: float = 0.5, y: float = 0.5) -> bool:
         result = self.call("drop", paths=[str(path) for path in paths], x=x, y=y)
@@ -130,9 +143,15 @@ class ViewerApp:
 
     def kill(self) -> None:
         self._disconnect()
-        if self.process is not None and self.process.poll() is None:
+        if self.process is None or self.process.poll() is not None:
+            return
+        if self.app_pid is not None and self.app_pid != self.process.pid:
+            # Under LaunchServices the app is not our child; ``open -W``
+            # exits once the app does.
+            os.kill(self.app_pid, signal.SIGKILL)
+        else:
             self.process.kill()
-            self.process.wait(timeout=DEFAULT_TIMEOUT)
+        self.process.wait(timeout=DEFAULT_TIMEOUT)
 
     def log_tail(self, lines: int = 30) -> str:
         if not self.log_path.exists():
@@ -149,12 +168,41 @@ class ViewerApp:
                 self.kill()
                 raise AssertionError(f"App did not start.\n{self.log_tail()}")
             time.sleep(0.05)
-        return json.loads(handshake.read_text())["port"]
+        details = json.loads(handshake.read_text())
+        self.app_pid = details["pid"]
+        return details["port"]
 
     def _disconnect(self) -> None:
         if self._connection is not None:
             self._connection.close()
             self._connection = None
+
+
+def packaged_macos_bundle() -> Path | None:
+    """Return the ``.app`` directory when testing a packaged macOS build."""
+
+    packaged = os.environ.get("ZPV_E2E_APP")
+    if sys.platform != "darwin" or not packaged:
+        return None
+    bundle = Path(packaged).parents[2]
+    return bundle if bundle.suffix == ".app" else None
+
+
+def _launch_services_command(
+    files: list[Path],
+    env: dict[str, str],
+    app_arguments: list[str],
+) -> list[str]:
+    # ``open`` hands the files to the app as Apple events, exactly like
+    # Finder. The app is started by launchd, so its environment is passed
+    # explicitly.
+    bundle = packaged_macos_bundle()
+    if bundle is None:
+        raise RuntimeError("LaunchServices launches need a packaged macOS bundle")
+    command = ["open", "-W", "-n", "-a", str(bundle)]
+    for name in ("ZIP_PICTURE_VIEWER_CONFIG_DIR", "ZIP_PICTURE_VIEWER_AUTOMATION_KEY"):
+        command += ["--env", f"{name}={env[name]}"]
+    return [*command, *map(str, files), "--args", *app_arguments]
 
 
 def app_command() -> list[str]:
