@@ -27,6 +27,13 @@ final class SourceLoader {
     private(set) var isShuttingDown = false
     private(set) var activeScans = 0
 
+    /// `ZIP_PICTURE_VIEWER_SCAN_DELAY_MS` slows scanning per container, so
+    /// tests can reproduce a slow (external) drive deterministically.
+    private static let slowScanDelay: TimeInterval = {
+        let value = ProcessInfo.processInfo.environment["ZIP_PICTURE_VIEWER_SCAN_DELAY_MS"]
+        return (value.flatMap(Double.init) ?? 0) / 1000
+    }()
+
     init(model: ViewerModel, session: SessionStore) {
         self.model = model
         self.session = session
@@ -51,6 +58,7 @@ final class SourceLoader {
         options.encoding = rootEncoding(context)
         options.encodingOverrides = encodingOverrides
         options.priorityContainer = focusArchive ?? session.savedContainer(context)
+        options.containerDelay = Self.slowScanDelay
         let flag = CancelFlag()
         cancelFlag = flag
         delegate?.sourceLoader(self, scanningChanged: true)

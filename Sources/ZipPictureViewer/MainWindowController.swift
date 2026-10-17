@@ -105,10 +105,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         switch command {
         case .openFolder: opener.chooseFolder(in: window)
         case .openArchive: opener.chooseArchive(in: window)
-        case .previous: if model.movePrevious() { display.showCurrent() }
-        case .next: if model.moveNext() { display.showCurrent() }
-        case .previousBundle: if model.moveBundle(by: -1) { display.showCurrent() }
-        case .nextBundle: if model.moveBundle(by: 1) { display.showCurrent() }
+        case .previous, .next, .previousBundle, .nextBundle: navigate(command)
         case .previousFolder: opener.openSibling(step: -1)
         case .nextFolder: opener.openSibling(step: 1)
         case .refresh: opener.refresh()
@@ -123,6 +120,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         case .issues: showIssues()
         case .minimize: window.miniaturize(nil)
         case .close: window.performClose(nil)
+        }
+    }
+
+    private func navigate(_ command: ViewerCommand) {
+        present(model.move(command))
+    }
+
+    private func present(_ move: ViewerModel.MoveResult) {
+        switch move {
+        case .moved: display.showCurrent()
+        case .waiting: controls.statusLabel.stringValue = "\(model.state.positionLabel)  ·  다음 항목 읽는 중…"
+        case .unchanged: break
         }
     }
 
@@ -239,6 +248,7 @@ extension MainWindowController: SourceLoaderDelegate {
     }
 
     func sourceLoader(_ loader: SourceLoader, applied context: SourceContext, result: ScanResult) {
+        model.cancelPendingMove()
         display.reset()
         updateIssues()
         if result.entries.isEmpty {
@@ -259,6 +269,7 @@ extension MainWindowController: SourceLoaderDelegate {
         updateNavigation()
         let scanning = model.isScanning ? "  ·  스캔 중…" : ""
         controls.statusLabel.stringValue = model.state.positionLabel + scanning
+        present(model.retryPendingMove())
     }
 
     func sourceLoader(_ loader: SourceLoader, rejected message: String) {

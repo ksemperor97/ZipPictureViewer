@@ -13,6 +13,8 @@ final class ViewerModel {
     private(set) var loadGeneration = 0
 
     var isScanning: Bool { pendingContext != nil }
+    /// The shown list is a snapshot of a scan that is still reading.
+    private(set) var isPartialList = false
 
     func beginLoad(_ context: SourceContext) -> Int {
         loadGeneration += 1
@@ -26,6 +28,7 @@ final class ViewerModel {
         currentContext = pending
         scanIssues = []
         state.setEntries(entries, currentIndex: index)
+        isPartialList = true
         return true
     }
 
@@ -35,6 +38,7 @@ final class ViewerModel {
         pendingContext = nil
         scanIssues = issues
         state.setEntries(entries, currentIndex: index)
+        isPartialList = false
         return true
     }
 
@@ -42,10 +46,55 @@ final class ViewerModel {
     func rejectLoad(_ generation: Int) -> Bool {
         guard generation == loadGeneration else { return false }
         pendingContext = nil
+        isPartialList = false
+        pendingMove = nil
         return true
     }
 
-    func moveNext() -> Bool { state.moveNext() }
-    func movePrevious() -> Bool { state.movePrevious() }
-    func moveBundle(by step: Int) -> Bool { state.moveBundle(by: step) }
+    // MARK: Navigation
+
+    enum MoveResult {
+        case moved, waiting, unchanged
+    }
+
+    /// A move past the part of the folder read so far, waiting for the scan.
+    private var pendingMove: ViewerCommand?
+
+    /// While a scan is still reading the folder, a move past the part read
+    /// so far waits for it instead of wrapping around or being dropped.
+    func move(_ command: ViewerCommand) -> MoveResult {
+        let pastLoadedEdge: Bool
+        switch command {
+        case .previous: pastLoadedEdge = state.isAtFirstEntry
+        case .next: pastLoadedEdge = state.isAtLastEntry
+        case .previousBundle: pastLoadedEdge = state.isInFirstBundle
+        case .nextBundle: pastLoadedEdge = state.isInLastBundle
+        default: return .unchanged
+        }
+        if isPartialList && pastLoadedEdge {
+            pendingMove = command
+            return .waiting
+        }
+        pendingMove = nil
+        let moved: Bool
+        switch command {
+        case .previous: moved = state.movePrevious()
+        case .next: moved = state.moveNext()
+        case .previousBundle: moved = state.moveBundle(by: -1)
+        default: moved = state.moveBundle(by: 1)
+        }
+        return moved ? .moved : .unchanged
+    }
+
+    /// Forget a waiting move when a different list is shown.
+    func cancelPendingMove() {
+        pendingMove = nil
+    }
+
+    /// Retry a waiting move after the list grew.
+    func retryPendingMove() -> MoveResult {
+        guard let command = pendingMove else { return .unchanged }
+        pendingMove = nil
+        return move(command)
+    }
 }
