@@ -20,45 +20,81 @@ public struct ScanOptions: Sendable {
 ///
 /// Every container is isolated: a corrupt archive becomes a `ScanIssue` and
 /// the rest of the collection still loads.
+///
+/// Containers are read outward from the priority container (the chosen
+/// archive or the saved position): it, then its next and previous
+/// neighbours, and so on. `preview` receives growing snapshots in final
+/// order, so the shown container and its neighbours can be browsed while a
+/// large or slow (external) folder is still being read.
 public enum CollectionScanner {
     public static func scan(
         root: URL,
         options: ScanOptions = ScanOptions(),
         isCancelled: () -> Bool = { false },
         progress: (URL, Int) -> Void = { _, _ in },
-        preview: ([ImageEntry]) -> Void = { _ in }
+        preview: ([ImageEntry]) -> Void = { _ in },
+        previewInterval: TimeInterval = 0.25
     ) -> ScanResult {
         var result = ScanResult()
         let containers = discover(root: root, result: &result, isCancelled: isCancelled)
         guard !result.cancelled, !containers.isEmpty else { return result }
 
-        let priority = options.priorityContainer.flatMap { containers.contains($0) ? $0 : nil }
-            ?? containers[0]
-        let early = scanContainer(priority, options: options, budget: options.maxIndexEntries)
-        if case .success(let entries) = early, !entries.isEmpty {
-            preview(entries)
-        }
+        let priority = options.priorityContainer.flatMap { containers.firstIndex(of: $0) } ?? 0
+        var outcomes = [Result<[ImageEntry], ScanFailure>?](repeating: nil, count: containers.count)
+        var indexedCount = 0
+        var lastPreview = Date.distantPast
+        var lastPreviewCount = 0
 
-        for (index, container) in containers.enumerated() {
+        for (step, index) in outwardOrder(from: priority, count: containers.count).enumerated() {
             if isCancelled() {
                 result.cancelled = true
-                break
+                return result
             }
-            let outcome: Result<[ImageEntry], ScanFailure>
-            if container == priority {
-                outcome = early
-            } else {
-                let reserved = (try? early.get().count) ?? 0
-                let budget = options.maxIndexEntries - result.entries.count - reserved
-                outcome = scanContainer(container, options: options, budget: budget)
+            let outcome = scanContainer(
+                containers[index],
+                options: options,
+                budget: options.maxIndexEntries - indexedCount
+            )
+            if case .success(let entries) = outcome { indexedCount += entries.count }
+            outcomes[index] = outcome
+            progress(containers[index], step + 1)
+
+            // The shown container and its two neighbours go out at once so
+            // ↑/↓ work immediately; after that a few snapshots per second.
+            let now = Date()
+            if step < 3 || now.timeIntervalSince(lastPreview) >= previewInterval {
+                let snapshot = outcomes.flatMap { outcome -> [ImageEntry] in
+                    guard case .success(let entries)? = outcome else { return [] }
+                    return entries
+                }
+                if snapshot.count > lastPreviewCount {
+                    preview(snapshot)
+                    lastPreview = now
+                    lastPreviewCount = snapshot.count
+                }
             }
+        }
+
+        for outcome in outcomes {
             switch outcome {
-            case .success(let entries): result.entries += entries
-            case .failure(let failure): result.issues.append(failure.issue)
+            case .success(let entries)?: result.entries += entries
+            case .failure(let failure)?: result.issues.append(failure.issue)
+            case nil: break
             }
-            progress(container, index + 1)
         }
         return result
+    }
+
+    /// `start`, then alternately the next and previous indices.
+    static func outwardOrder(from start: Int, count: Int) -> [Int] {
+        var order = [start]
+        var offset = 1
+        while order.count < count {
+            if start + offset < count { order.append(start + offset) }
+            if start - offset >= 0 { order.append(start - offset) }
+            offset += 1
+        }
+        return order
     }
 
     struct ScanFailure: Error {
