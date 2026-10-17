@@ -1,11 +1,17 @@
+# Swift
+.build/
+.swiftpm/
+dist/
+*.xcodeproj/xcuserdata/
+
+# Python test runner
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.venv/
-dist/
-build/
-*.egg-info/
+.ruff_cache/
+.venv
+
+# Local files
 assets/*.iconset/
 AGENTS.md
-.venv
 .DS_Store
