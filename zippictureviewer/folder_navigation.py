@@ -70,6 +70,26 @@ def sibling_context(context: FolderContext, step: int) -> FolderContext | None:
     return FolderContext.from_path(sibling, context.source_kind)
 
 
+def containing_folder_context(archive: FolderContext) -> FolderContext | None:
+    """Return the folder to browse when the user opens a single archive.
+
+    Opening one archive should expose its sibling archives as one continuous
+    collection. The home directory and filesystem roots are excluded because
+    a recursive scan there is slow and can trigger OS privacy prompts.
+    """
+
+    if archive.source_kind != "archive":
+        return None
+    parent = parent_folder(archive)
+    if parent is None or _is_broad_scan_root(parent):
+        return None
+    return FolderContext.from_path(parent, "folder")
+
+
+def _is_broad_scan_root(folder: Path) -> bool:
+    return folder.parent == folder or folder.resolve() == Path.home().resolve()
+
+
 def _child_archives(folder: Path) -> list[Path]:
     try:
         children = [

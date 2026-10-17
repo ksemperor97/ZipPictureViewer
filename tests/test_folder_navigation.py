@@ -7,6 +7,7 @@ import pytest
 from zippictureviewer.folder_context import FolderContext
 from zippictureviewer.folder_navigation import (
     child_folders,
+    containing_folder_context,
     sibling_context,
     sibling_folder,
 )
@@ -72,3 +73,27 @@ def _create_directory_symlink(alias: Path, target: Path) -> None:
         alias.symlink_to(target, target_is_directory=True)
     except OSError as error:
         pytest.skip(f"Directory symlinks are unavailable: {error}")
+
+
+def test_containing_folder_context_opens_archive_parent(tmp_path: Path) -> None:
+    archive = tmp_path / "library" / "book.zip"
+    archive.parent.mkdir()
+    archive.write_bytes(b"zip")
+
+    folder = containing_folder_context(FolderContext.from_path(archive))
+
+    assert folder is not None
+    assert folder.source_kind == "folder"
+    assert folder.logical_path == archive.parent
+
+
+def test_containing_folder_context_skips_folders_and_home(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "book.zip"
+    archive.write_bytes(b"zip")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    assert containing_folder_context(FolderContext.from_path(archive)) is None
+    assert containing_folder_context(FolderContext.from_path(tmp_path)) is None

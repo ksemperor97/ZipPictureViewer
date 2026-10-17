@@ -84,6 +84,100 @@ def test_direct_archive_and_drop_use_the_same_source_path(
     assert window.state.current_entry.member_name == "page.png"
 
 
+def _write_book(path: Path, page_names: list[str]) -> None:
+    png_bytes = _write_png(path.with_suffix(".png"))
+    path.with_suffix(".png").unlink()
+    with ZipFile(path, "w", ZIP_DEFLATED) as archive:
+        for page_name in page_names:
+            archive.writestr(page_name, png_bytes)
+
+
+def _library(tmp_path: Path) -> Path:
+    library = tmp_path / "library"
+    library.mkdir()
+    for name in ("vol1.zip", "vol2.zip", "vol10.cbz"):
+        _write_book(library / name, ["p1.png", "p2.png", "p3.png"])
+    return library
+
+
+def test_opening_one_archive_loads_its_sibling_archives(
+    qtbot,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    library = _library(tmp_path)
+    window = _window(qtbot, monkeypatch, tmp_path)
+
+    window.open_path(library / "vol2.zip")
+    qtbot.waitUntil(lambda: window.state.has_entries, timeout=3000)
+
+    assert window.current_context.source_kind == "folder"
+    assert window.current_root == library
+    assert len(window.state.entries) == 9
+    assert window.state.current_entry.archive_path.name == "vol2.zip"
+    assert window.state.current_entry.member_name == "p1.png"
+
+    window.show_next_archive()
+    assert window.state.current_entry.archive_path.name == "vol10.cbz"
+
+
+def test_opening_archive_resumes_saved_page_inside_that_archive(
+    qtbot,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    library = _library(tmp_path)
+    window = _window(qtbot, monkeypatch, tmp_path)
+    window.open_path(library / "vol2.zip")
+    qtbot.waitUntil(lambda: window.state.has_entries, timeout=3000)
+    window.show_next_image()
+    window.position_saver.flush()
+
+    window.open_path(library / "vol2.zip")
+    qtbot.waitUntil(
+        lambda: window.controller.pending_context is None
+        and window.state.current_entry.member_name == "p2.png",
+        timeout=3000,
+    )
+    assert window.state.current_entry.archive_path.name == "vol2.zip"
+
+    window.open_path(library / "vol1.zip")
+    qtbot.waitUntil(
+        lambda: window.controller.pending_context is None
+        and window.state.current_entry.archive_path.name == "vol1.zip",
+        timeout=3000,
+    )
+    assert window.state.current_entry.member_name == "p1.png"
+
+
+def test_dropping_an_archive_opens_its_folder(
+    qtbot,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    library = _library(tmp_path)
+    window = _window(qtbot, monkeypatch, tmp_path)
+    loaded: list[tuple[Path, Path | None]] = []
+    monkeypatch.setattr(
+        window.source_loader,
+        "load",
+        lambda context, focus=None: loaded.append((context.logical_path, focus)),
+    )
+    mime_data = QMimeData()
+    mime_data.setUrls([QUrl.fromLocalFile(str(library / "vol1.zip"))])
+    drop_event = QDropEvent(
+        QPointF(10, 10),
+        Qt.DropAction.CopyAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+    window.dropEvent(drop_event)
+
+    assert loaded == [(library, library / "vol1.zip")]
+
+
 def test_image_surface_routes_file_drops_to_main_window(
     qtbot,
     monkeypatch,
@@ -93,7 +187,7 @@ def test_image_surface_routes_file_drops_to_main_window(
     archive_path.write_bytes(b"placeholder")
     window = _window(qtbot, monkeypatch, tmp_path)
     loaded_sources: list[Path] = []
-    monkeypatch.setattr(window, "load_source", loaded_sources.append)
+    monkeypatch.setattr(window, "open_path", loaded_sources.append)
 
     receiver = window.image_view.viewport()
     while receiver is not None and not receiver.acceptDrops():

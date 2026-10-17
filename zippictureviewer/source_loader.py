@@ -33,18 +33,35 @@ class SourceLoader(QObject):
         self.scanner = ScanCoordinator(parent=self)
         self._source_encodings: dict[str, MetadataEncoding] = {}
         self._encoding_overrides: dict[Path, MetadataEncoding] = {}
+        self._focus_archive: Path | None = None
         self._shutting_down = False
         self.scanner.progress.connect(self._scan_progress)
         self.scanner.finished.connect(self._scan_finished)
         self.scanner.failed.connect(self._scan_failed)
 
-    def load(self, source: Path | FolderContext) -> bool:
+    def load(
+        self,
+        source: Path | FolderContext,
+        focus_archive: Path | None = None,
+    ) -> bool:
+        """Start scanning ``source``.
+
+        ``focus_archive`` names a container inside a folder source whose first
+        image should be shown, unless the saved position is already inside it.
+        It is replaced by every call, so it always belongs to the latest scan.
+        """
+
         context = (
             source
             if isinstance(source, FolderContext)
             else FolderContext.from_path(source)
         )
         generation = self.controller.begin_load(context)
+        self._focus_archive = (
+            _focus_access_path(context, focus_archive)
+            if focus_archive is not None
+            else None
+        )
         if not context.is_accessible:
             self.scanner.cancel_except(generation)
             self.controller.reject_load(generation)
@@ -123,12 +140,12 @@ class SourceLoader(QObject):
             return
 
         self.before_apply.emit()
-        restored_index = self.session_store.restore_index(context, result.entries)
+        initial_index = self._initial_index(context, result.entries)
         if not self.controller.apply_load(
             generation,
             result.entries,
             result.issues,
-            restored_index,
+            initial_index,
         ):
             return
         self.session_store.save_root(context)
@@ -142,6 +159,38 @@ class SourceLoader(QObject):
             return
         self.scanning_changed.emit(False)
         self.source_rejected.emit(f"스캔 실패: {message}")
+
+
+    def _initial_index(
+        self,
+        context: FolderContext,
+        entries: list[ImageEntry],
+    ) -> int:
+        restored_index = self.session_store.restore_index(context, entries)
+        focus_path = self._focus_archive
+        self._focus_archive = None
+        if focus_path is None:
+            return restored_index
+
+        if (
+            0 <= restored_index < len(entries)
+            and entries[restored_index].archive_path == focus_path
+        ):
+            return restored_index
+        for index, entry in enumerate(entries):
+            if entry.archive_path == focus_path:
+                return index
+        # The chosen archive yielded no images (corrupt, empty or encrypted);
+        # its scan issue is reported, so keep the normal restored position.
+        return restored_index
+
+
+def _focus_access_path(context: FolderContext, focus_archive: Path) -> Path:
+    # The scanner walks ``access_path``, so entries name containers under the
+    # resolved root. Rebase the focus the same way to allow exact comparison.
+    return context.access_path / Path(focus_archive).relative_to(
+        context.logical_path
+    )
 
 
 def _root_load_failed(context: FolderContext, result: ScanResult) -> bool:

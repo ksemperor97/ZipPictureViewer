@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from .folder_context import ARCHIVE_EXTENSIONS, FolderContext
-from .folder_navigation import sibling_context
+from .folder_navigation import containing_folder_context, sibling_context
 from .image_view import ImageView
 from .issue_dialog import IssueDialog
 from .mac_presentation import set_menu_bar_auto_hidden
@@ -141,14 +141,35 @@ class MainWindow(QMainWindow):
             "ZIP archives (*.zip *.cbz)",
         )
         if selected:
-            self.load_source(Path(selected))
+            self.open_path(Path(selected))
+
+    def open_path(self, path: Path) -> None:
+        """Open a user-chosen folder or archive.
+
+        A chosen archive opens its containing folder so sibling archives stay
+        reachable, starting at the chosen archive. ``load_source`` keeps the
+        exact-source semantics used by session restore and sibling navigation.
+        """
+
+        if self._closing:
+            return
+        context = FolderContext.from_path(path)
+        folder_context = containing_folder_context(context)
+        if folder_context is None:
+            self.load_source(context)
+            return
+        self.load_source(folder_context, focus_archive=context.logical_path)
 
     def load_folder(self, root: Path) -> None:
         """Compatibility alias for callers that load directory roots."""
 
         self.load_source(root)
 
-    def load_source(self, source: Path | FolderContext) -> None:
+    def load_source(
+        self,
+        source: Path | FolderContext,
+        focus_archive: Path | None = None,
+    ) -> None:
         if self._closing:
             return
         context = (
@@ -161,7 +182,7 @@ class MainWindow(QMainWindow):
         )
         self._select_encoding_for(context, selected_entry)
         self.source_loader.session_store = self.session_store
-        if self.source_loader.load(context):
+        if self.source_loader.load(context, focus_archive):
             self.overlays.show_temporarily()
 
     def refresh_source(self) -> None:
@@ -193,7 +214,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         event.acceptProposedAction()
-        self.load_source(source)
+        self.open_path(source)
 
     def show_current_image(self) -> None:
         if self._closing:
