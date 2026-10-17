@@ -7,8 +7,9 @@ protocol SourceLoaderDelegate: AnyObject {
     func sourceLoaderWillApply(_ loader: SourceLoader)
     /// A source is shown, from a preview or a complete scan.
     func sourceLoader(_ loader: SourceLoader, applied context: SourceContext, result: ScanResult)
-    /// A previewed source received its complete list; the shown image stays.
-    func sourceLoader(_ loader: SourceLoader, completed context: SourceContext, result: ScanResult)
+    /// The shown source's list grew (more of a scan, or its final result)
+    /// while the shown image stays the same.
+    func sourceLoader(_ loader: SourceLoader, extended context: SourceContext, result: ScanResult)
     func sourceLoader(_ loader: SourceLoader, rejected message: String)
 }
 
@@ -107,17 +108,25 @@ final class SourceLoader {
 
     private func scanProgress(_ generation: Int, url: URL, count: Int) {
         guard generation == model.loadGeneration, model.isScanning else { return }
-        delegate?.sourceLoader(self, statusChanged: "스캔 중… \(count)  \(url.lastPathComponent)")
+        let browsing = previewedGeneration == generation ? "\(model.state.positionLabel)  ·  " : ""
+        delegate?.sourceLoader(self, statusChanged: "\(browsing)스캔 중… \(count)  \(url.lastPathComponent)")
     }
 
     private func scanPreview(_ generation: Int, entries: [ImageEntry]) {
         guard !isShuttingDown, generation == model.loadGeneration, let context = model.pendingContext else { return }
+        var snapshot = ScanResult()
+        snapshot.entries = entries
+        if previewedGeneration == generation {
+            // A larger snapshot: keep showing the same image.
+            let shown = model.state.currentEntry.flatMap { entries.firstIndex(of: $0) }
+            guard model.applyPreview(generation, entries: entries, index: shown ?? model.state.currentIndex) else { return }
+            delegate?.sourceLoader(self, extended: context, result: snapshot)
+            return
+        }
         let index = initialIndex(context, entries: entries)
         guard model.applyPreview(generation, entries: entries, index: index) else { return }
         previewedGeneration = generation
-        var preview = ScanResult()
-        preview.entries = entries
-        delegate?.sourceLoader(self, applied: context, result: preview)
+        delegate?.sourceLoader(self, applied: context, result: snapshot)
     }
 
     private func scanFinished(_ generation: Int, result: ScanResult) {
@@ -144,7 +153,7 @@ final class SourceLoader {
         guard model.applyLoad(generation, entries: result.entries, issues: result.issues, index: index) else { return }
         session.saveRoot(context)
         if keptIndex != nil {
-            delegate?.sourceLoader(self, completed: context, result: result)
+            delegate?.sourceLoader(self, extended: context, result: result)
         } else {
             delegate?.sourceLoader(self, applied: context, result: result)
         }

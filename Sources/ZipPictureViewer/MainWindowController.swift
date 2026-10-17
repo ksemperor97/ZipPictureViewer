@@ -254,10 +254,11 @@ extension MainWindowController: SourceLoaderDelegate {
         display.showCurrent()
     }
 
-    func sourceLoader(_ loader: SourceLoader, completed context: SourceContext, result: ScanResult) {
+    func sourceLoader(_ loader: SourceLoader, extended context: SourceContext, result: ScanResult) {
         updateIssues()
         updateNavigation()
-        controls.statusLabel.stringValue = model.state.positionLabel
+        let scanning = model.isScanning ? "  ·  스캔 중…" : ""
+        controls.statusLabel.stringValue = model.state.positionLabel + scanning
     }
 
     func sourceLoader(_ loader: SourceLoader, rejected message: String) {
