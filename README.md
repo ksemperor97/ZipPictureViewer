@@ -65,9 +65,51 @@ swift run ZipPictureViewer ~/Comics/Series/vol01.zip
 Scripts/build_app.sh
 ```
 
-결과물은 `dist/ZipPictureViewer.app`과 `dist/ZipPictureViewer-v<버전>-mac.zip`(+ `.sha256`)입니다. 기본은 ad-hoc 서명이며, `CODESIGN_IDENTITY`로 서명 인증서를 지정할 수 있습니다. 앱 안에서 디코더, ZIP 스캔, 세션 저장을 점검하려면 `--smoke-test`로 실행합니다.
+결과물은 `dist/ZipPictureViewer.app`과 `dist/ZipPictureViewer-v<버전>-mac.zip`(+ `.sha256`)입니다. Apple Silicon과 Intel을 함께 담은 유니버설 앱이며(`lipo`로 두 아키텍처와 최소 macOS 13.0을 확인), 여러 아키텍처 빌드에는 Xcode가 필요합니다. Command Line Tools만 있으면 `ARCHS=arm64`처럼 한 아키텍처만 지정합니다. 기본은 hardened runtime을 켠 ad-hoc 서명이며, `CODESIGN_IDENTITY`로 서명 인증서를 지정할 수 있습니다. 앱 안에서 디코더, ZIP 스캔, 세션 저장을 점검하려면 `--smoke-test`로 실행합니다.
 
 Xcode에서 개발하려면 `Package.swift`를 열면 됩니다.
+
+## 배포
+
+정식 배포본은 Developer ID로 서명하고 Apple 공증(notarization)을 받은 유니버설 앱입니다.
+
+### GitHub Actions로 배포
+
+1. `VERSION`을 새 버전으로 올려 `main`에 병합합니다.
+2. 같은 버전의 태그를 만들어 올립니다.
+
+   ```bash
+   git tag v2.0.0 && git push origin v2.0.0
+   ```
+
+3. Actions의 `Release` 워크플로를 `tag`에 `v2.0.0`을 넣어 실행합니다. 태그와 `VERSION`이 다르면 멈춥니다.
+
+워크플로는 인증서를 임시 키체인에 넣고, 유니버설 앱을 빌드·서명한 뒤 `--smoke-test`(Rosetta로 Intel 쪽도)와 E2E 테스트를 앱 번들에 돌립니다. 통과하면 공증을 받아 티켓을 붙이고(`stapler`), `spctl`로 Gatekeeper 통과를 확인한 다음 zip과 `.sha256`을 그 태그의 GitHub 릴리스에 올립니다. 릴리스가 없으면 초안(draft)으로 만들므로, 내용을 확인한 뒤 직접 공개합니다. `upload_to_release`를 끄면 워크플로 아티팩트로만 남깁니다.
+
+필요한 저장소 시크릿:
+
+| 시크릿 | 내용 |
+|---|---|
+| `MACOS_CERTIFICATE_BASE64` | `Developer ID Application` 인증서와 개인 키를 내보낸 `.p12`의 base64 (`base64 -i cert.p12`) |
+| `MACOS_CERTIFICATE_PASSWORD` | 그 `.p12`의 암호 |
+| `MACOS_SIGNING_IDENTITY` | 서명 ID, 예: `Developer ID Application: 이름 (TEAMID)` |
+| `MACOS_NOTARY_APPLE_ID` | 공증에 쓸 Apple ID |
+| `MACOS_NOTARY_TEAM_ID` | 개발자 팀 ID |
+| `MACOS_NOTARY_PASSWORD` | 그 Apple ID의 앱 암호(app-specific password) |
+
+### 내 Mac에서 배포본 만들기
+
+키체인에 Developer ID 인증서가 있고 `notarytool` 프로필을 저장해 두었다면 같은 과정을 로컬에서 할 수 있습니다.
+
+```bash
+xcrun notarytool store-credentials zpv-notary --apple-id <Apple ID> --team-id <TEAMID>
+```
+
+```bash
+CODESIGN_IDENTITY="Developer ID Application: 이름 (TEAMID)" NOTARYTOOL_PROFILE=zpv-notary Scripts/build_app.sh
+```
+
+이미 서명한 앱만 공증하려면 `NOTARYTOOL_PROFILE=zpv-notary Scripts/notarize_app.sh`를 실행합니다. ad-hoc 서명이거나 hardened runtime이 없으면 제출 전에 멈추고, 공증이 거절되면 Apple의 로그를 출력합니다.
 
 ## 구조
 
@@ -75,7 +117,9 @@ Xcode에서 개발하려면 `Package.swift`를 열면 됩니다.
 |---|---|
 | `Sources/ViewerCore` | UI 없는 핵심: 형식, 자연 정렬, ZIP 중앙 디렉터리·이름 인코딩·항목 읽기(Stored/Deflate/ZipCrypto), 스캔, 폴더 탐색, 세션 |
 | `Sources/ZipPictureViewer` | AppKit 앱: 창 구성, 이미지 캔버스, ImageIO 디코더와 캐시, 스캔 적용, 조작 패널, 테스트용 자동화 채널 |
-| `Scripts/build_app.sh`, `Resources/Info.plist` | 앱 번들 조립, Finder 문서 유형 선언 |
+| `Scripts/build_app.sh`, `Resources/Info.plist` | 유니버설 빌드, 앱 번들 조립과 서명, Finder 문서 유형 선언 |
+| `Scripts/notarize_app.sh`, `Scripts/package_app.sh` | 공증·staple·Gatekeeper 확인, 배포용 zip과 체크섬 |
+| `.github/workflows` | CI(`ci.yml`), 서명·공증 배포(`release.yml`) |
 | `tests/` | 실제 앱을 띄워 조작하는 E2E 테스트 |
 
 ## 테스트

@@ -38,6 +38,14 @@ jobs:
       - name: Smoke test the bundle
         run: dist/ZipPictureViewer.app/Contents/MacOS/ZipPictureViewer --smoke-test
 
+      - name: Smoke test the x86_64 slice under Rosetta
+        run: |
+          if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            echo "::warning::Rosetta is not available; the x86_64 slice was not run"
+            exit 0
+          fi
+          arch -x86_64 dist/ZipPictureViewer.app/Contents/MacOS/ZipPictureViewer --smoke-test
+
       - name: End-to-end tests (app bundle)
         env:
           ZPV_E2E_APP: ${{ github.workspace }}/dist/ZipPictureViewer.app/Contents/MacOS/ZipPictureViewer
