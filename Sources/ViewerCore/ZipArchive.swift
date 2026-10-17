@@ -5,6 +5,7 @@ public struct ZipError: Error, CustomStringConvertible, Sendable {
         case badZip = "bad_zip"
         case resourceLimit = "resource_limit"
         case unsupported = "unsupported_archive"
+        case encryptionUnsupported = "unsupported_encryption"
         case passwordRequired = "password_required"
         case wrongPassword = "wrong_password"
         case changed = "source_changed"

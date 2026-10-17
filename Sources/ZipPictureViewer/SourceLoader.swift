@@ -2,7 +2,7 @@ import Foundation
 import ViewerCore
 
 protocol SourceLoaderDelegate: AnyObject {
-    func sourceLoader(_ loader: SourceLoader, statusChanged message: String)
+    func sourceLoader(_ loader: SourceLoader, statusChanged message: LocalizedText)
     func sourceLoader(_ loader: SourceLoader, scanningChanged scanning: Bool)
     func sourceLoaderWillApply(_ loader: SourceLoader)
     /// A source is shown, from a preview or a complete scan.
@@ -10,7 +10,7 @@ protocol SourceLoaderDelegate: AnyObject {
     /// The shown source's list grew (more of a scan, or its final result)
     /// while the shown image stays the same.
     func sourceLoader(_ loader: SourceLoader, extended context: SourceContext, result: ScanResult)
-    func sourceLoader(_ loader: SourceLoader, rejected message: String)
+    func sourceLoader(_ loader: SourceLoader, rejected message: LocalizedText)
 }
 
 /// Runs scans in the background and applies their results to the model.
@@ -50,7 +50,8 @@ final class SourceLoader {
         guard context.isAccessible else {
             model.rejectLoad(generation)
             delegate?.sourceLoader(self, scanningChanged: false)
-            delegate?.sourceLoader(self, rejected: "열 수 없는 경로: \(context.logicalPath.path)")
+            let path = context.logicalPath.path
+            delegate?.sourceLoader(self, rejected: L("열 수 없는 경로: \(path)", "Cannot open: \(path)"))
             return false
         }
 
@@ -62,7 +63,7 @@ final class SourceLoader {
         let flag = CancelFlag()
         cancelFlag = flag
         delegate?.sourceLoader(self, scanningChanged: true)
-        delegate?.sourceLoader(self, statusChanged: "스캔 중…")
+        delegate?.sourceLoader(self, statusChanged: L("스캔 중…", "Scanning…"))
         activeScans += 1
         queue.async { [weak self] in
             let result = CollectionScanner.scan(
@@ -85,7 +86,7 @@ final class SourceLoader {
     func cancelCurrent() -> Bool {
         guard model.isScanning else { return false }
         cancelFlag.cancel()
-        delegate?.sourceLoader(self, statusChanged: "스캔 취소 요청됨…")
+        delegate?.sourceLoader(self, statusChanged: L("스캔 취소 요청됨…", "Cancelling the scan…"))
         return true
     }
 
@@ -116,8 +117,12 @@ final class SourceLoader {
 
     private func scanProgress(_ generation: Int, url: URL, count: Int) {
         guard generation == model.loadGeneration, model.isScanning else { return }
-        let browsing = previewedGeneration == generation ? "\(model.state.positionLabel)  ·  " : ""
-        delegate?.sourceLoader(self, statusChanged: "\(browsing)스캔 중… \(count)  \(url.lastPathComponent)")
+        let name = url.lastPathComponent
+        let scanning = L("스캔 중… \(count)  \(name)", "Scanning… \(count)  \(name)")
+        let status = previewedGeneration == generation
+            ? LocalizedText(verbatim: model.state.positionLabel).joined(with: scanning)
+            : scanning
+        delegate?.sourceLoader(self, statusChanged: status)
     }
 
     private func scanPreview(_ generation: Int, entries: [ImageEntry]) {
@@ -144,12 +149,13 @@ final class SourceLoader {
         delegate?.sourceLoader(self, scanningChanged: false)
         if !context.isAccessible || result.issues.contains(where: { $0.stage == "discover" && $0.target == context.accessPath }) {
             model.rejectLoad(generation)
-            delegate?.sourceLoader(self, rejected: "원본을 더 이상 열 수 없습니다: \(context.logicalPath.path)")
+            let path = context.logicalPath.path
+            delegate?.sourceLoader(self, rejected: L("원본을 더 이상 열 수 없습니다: \(path)", "The source can no longer be opened: \(path)"))
             return
         }
         if result.cancelled {
             model.rejectLoad(generation)
-            delegate?.sourceLoader(self, rejected: "스캔 취소됨")
+            delegate?.sourceLoader(self, rejected: L("스캔 취소됨", "Scan cancelled"))
             return
         }
 
