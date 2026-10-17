@@ -73,7 +73,6 @@ a = Analysis(
         'PySide6.QtStateMachine',
         'PySide6.QtSvg',
         'PySide6.QtSvgWidgets',
-        'PySide6.QtTest',
         'PySide6.QtTextToSpeech',
         'PySide6.QtWebChannel',
         'PySide6.QtWebEngineCore',

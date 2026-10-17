@@ -18,7 +18,13 @@ SESSION_VERSION = 2
 SerializedMemberId = str | dict[str, int]
 
 
+CONFIG_DIR_ENV = "ZIP_PICTURE_VIEWER_CONFIG_DIR"
+
+
 def app_support_dir() -> Path:
+    override = os.environ.get(CONFIG_DIR_ENV)
+    if override:
+        return Path(override)
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "ZipPictureViewer"
 

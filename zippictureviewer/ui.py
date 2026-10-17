@@ -2,17 +2,26 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
 from .viewer_window import MainWindow
 
 
-def run_app(argv: Sequence[str] | None = None) -> int:
+def run_app(
+    argv: Sequence[str] | None = None,
+    *,
+    automation_handshake: str | None = None,
+) -> int:
     app = QApplication(list(argv) if argv is not None else sys.argv)
     app.setApplicationName("ZipPictureViewer")
     window = MainWindow()
     window.show()
+    if automation_handshake:
+        from .automation import AutomationServer
+
+        AutomationServer(window, Path(automation_handshake))
     return app.exec()
 
 

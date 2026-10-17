@@ -12,6 +12,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="validate the packaged Qt runtime and exit",
     )
+    # Used by the end-to-end tests to drive a real app process.
+    parser.add_argument("--automation-handshake", help=argparse.SUPPRESS)
     arguments = list(sys.argv[1:] if argv is None else argv)
     options, qt_arguments = parser.parse_known_args(arguments)
     try:
@@ -29,7 +31,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         raise
 
-    return run_app([sys.argv[0], *qt_arguments])
+    return run_app(
+        [sys.argv[0], *qt_arguments],
+        automation_handshake=options.automation_handshake,
+    )
 
 
 if __name__ == "__main__":
