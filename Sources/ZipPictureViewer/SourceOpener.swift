@@ -3,7 +3,7 @@ import ViewerCore
 
 /// Turns user requests (dialogs, drops, Finder, restore) into source loads.
 final class SourceOpener {
-    var onMessage: ((String) -> Void)?
+    var onMessage: ((LocalizedText) -> Void)?
     var onLoadStarted: (() -> Void)?
     private let model: ViewerModel
     private let loader: SourceLoader
@@ -33,7 +33,7 @@ final class SourceOpener {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
-        panel.message = "이미지 컬렉션 폴더 선택"
+        panel.message = L("이미지 컬렉션 폴더 선택", "Choose an image collection folder").string
         panel.beginSheetModal(for: window) { [weak self] response in
             if response == .OK, let url = panel.url { self?.open(url) }
         }
@@ -44,7 +44,7 @@ final class SourceOpener {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowedContentTypes = [.zip] + [.init(filenameExtension: "cbz")].compactMap { $0 }
-        panel.message = "ZIP/CBZ 선택"
+        panel.message = L("ZIP/CBZ 선택", "Choose a ZIP/CBZ file").string
         panel.beginSheetModal(for: window) { [weak self] response in
             if response == .OK, let url = panel.url { self?.open(url) }
         }
@@ -76,7 +76,7 @@ final class SourceOpener {
     func openSibling(step: Int) {
         guard let context = model.currentContext else { return }
         guard let sibling = FolderNavigation.sibling(of: context, step: step) else {
-            onMessage?("형제 항목을 찾지 못했습니다")
+            onMessage?(L("형제 항목을 찾지 못했습니다", "No sibling folder or archive found"))
             return
         }
         load(sibling)

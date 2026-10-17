@@ -3,7 +3,7 @@ import ViewerCore
 
 protocol DisplayControllerDelegate: AnyObject {
     func display(_ display: DisplayController, startedEntry entry: ImageEntry)
-    func display(_ display: DisplayController, statusChanged message: String)
+    func display(_ display: DisplayController, statusChanged message: LocalizedText)
     func displayErrorsChanged(_ display: DisplayController)
     /// Ask for a ZipCrypto password; `nil` means the user cancelled.
     func display(_ display: DisplayController, passwordFor entry: ImageEntry, completion: @escaping (String?) -> Void)
@@ -18,7 +18,7 @@ final class DisplayController {
     private let model: ViewerModel
     private let canvas: ImageCanvas
     private let decoder = ImageDecoder()
-    private(set) var errors: [ImageEntry: String] = [:]
+    private(set) var errors: [ImageEntry: LocalizedText] = [:]
     private var passwords: [URL: Data] = [:]
     private var token = 0
     private var presentedToken = 0
@@ -30,9 +30,9 @@ final class DisplayController {
         self.model = model
         self.canvas = canvas
         canvas.onViewChanged = { [weak self] in self?.scheduleUpgrade() }
-        canvas.onAnimationFailed = { [weak self] message in
+        canvas.onAnimationFailed = { [weak self] code in
             guard let self, let entry = model.state.currentEntry else { return }
-            self.showError(message, for: entry)
+            self.showError(L("GIF 재생 오류: \(code)", "GIF playback error: \(code)"), for: entry)
         }
     }
 
@@ -49,7 +49,7 @@ final class DisplayController {
     }
 
     func issueMessages() -> [String] {
-        errors.map { entry, message in "[display] \(entry.container.path) | \(entry.memberName)\n\(message)" }
+        errors.map { entry, message in "[display] \(entry.container.path) | \(entry.memberName)\n\(message.string)" }
             .sorted()
     }
 
@@ -68,7 +68,7 @@ final class DisplayController {
         // Only show a loading message when decoding is noticeably slow.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self, self.token == current, self.presentedToken != current else { return }
-            self.canvas.showMessage("불러오는 중…")
+            self.canvas.showMessage(L("불러오는 중…", "Loading…"))
         }
         withPassword(for: entry, token: current) { [weak self] password in
             guard let self else { return }
@@ -99,21 +99,44 @@ final class DisplayController {
             if error.kind == .wrongPassword {
                 passwords.removeValue(forKey: entry.container)
             }
-            showError(error.message, for: entry, kind: error.kind == .resourceLimit ? "자원 한도" : "오류")
+            let kind = error.kind == .resourceLimit ? L("자원 한도", "Resource limit") : Self.errorKind
+            showError(Self.reason(for: error), for: entry, kind: kind)
         }
     }
 
-    private func showError(_ message: String, for entry: ImageEntry, kind: String = "오류") {
+    private static let errorKind = L("오류", "Error")
+
+    /// User-facing reason; technical details stay in English.
+    private static func reason(for error: ZipError) -> LocalizedText {
+        switch error.kind {
+        case .encryptionUnsupported:
+            return L("AES 방식으로 암호화된 ZIP은 지원하지 않습니다.", "AES-encrypted ZIP archives are not supported.")
+        case .wrongPassword:
+            return L("ZIP 암호가 올바르지 않습니다.", "The ZIP password is incorrect.")
+        case .passwordRequired:
+            return L("ZIP 암호가 필요합니다.", "A ZIP password is required.")
+        case .resourceLimit:
+            return L("안전 한도를 넘었습니다. \(error.message)", "Over a safety limit. \(error.message)")
+        default:
+            return LocalizedText(verbatim: error.message)
+        }
+    }
+
+    private func showError(_ message: LocalizedText, for entry: ImageEntry, kind: LocalizedText = errorKind) {
         presentedToken = token
         originalSize = .zero
         errors[entry] = message
-        canvas.showMessage("이미지를 열 수 없습니다\n\(entry.imageLabel)\n\(message)")
-        delegate?.display(self, statusChanged: "\(model.state.positionLabel)  ·  \(kind)")
+        let label = entry.imageLabel
+        canvas.showMessage(L(
+            "이미지를 열 수 없습니다\n\(label)\n\(message.korean)",
+            "Cannot open the image\n\(label)\n\(message.english)"
+        ))
+        delegate?.display(self, statusChanged: LocalizedText(verbatim: model.state.positionLabel).joined(with: kind))
         delegate?.displayErrorsChanged(self)
     }
 
     private func clearError(for entry: ImageEntry) {
-        delegate?.display(self, statusChanged: model.state.positionLabel)
+        delegate?.display(self, statusChanged: LocalizedText(verbatim: model.state.positionLabel))
         if errors.removeValue(forKey: entry) != nil {
             delegate?.displayErrorsChanged(self)
         }
@@ -133,7 +156,7 @@ final class DisplayController {
         delegate?.display(self, passwordFor: entry) { [weak self] answer in
             guard let self, self.token == current else { return }
             guard let answer else {
-                self.showError("ZIP 암호 입력을 취소했습니다.", for: entry)
+                self.showError(L("ZIP 암호 입력을 취소했습니다.", "ZIP password entry was cancelled."), for: entry)
                 return
             }
             let password = Data(answer.utf8)

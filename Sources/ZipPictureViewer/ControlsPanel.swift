@@ -10,41 +10,44 @@ enum ViewerCommand {
 
 /// Floating HUD with the viewer's buttons and status.
 ///
-/// Compact mode shows the everyday buttons; "펼치기" reveals the rest.
+/// Compact mode shows the everyday buttons; "More" reveals the rest.
 final class ControlsPanel: NSVisualEffectView {
     var onCommand: ((ViewerCommand) -> Void)?
     var onEncodingChange: ((NameEncoding) -> Void)?
 
     /// Buttons by the automation name used in tests (e.g. "next_button").
     private(set) var buttons: [String: NSButton] = [:]
-    let statusLabel = NSTextField(labelWithString: "폴더 또는 ZIP 열기")
+    let statusLabel = NSTextField(labelWithString: "")
     let encodingPopup = NSPopUpButton()
     private let secondaryRow = NSStackView()
     private(set) var isExpanded = false
+    private var status = L("폴더 또는 ZIP 열기", "Open a folder or ZIP")
+    private var issueCount = 0
+    private var isFullscreen = false
 
-    private static let compact: [(String, String, ViewerCommand?)] = [
-        ("open_button", "폴더 열기", .openFolder),
-        ("previous_button", "← 이전", .previous),
-        ("next_button", "다음 →", .next),
-        ("close_button", "닫기", .close),
-        ("expand_button", "펼치기", nil),
+    private static let compact: [(String, LocalizedText, ViewerCommand?)] = [
+        ("open_button", L("폴더 열기", "Open Folder"), .openFolder),
+        ("previous_button", L("← 이전", "← Previous"), .previous),
+        ("next_button", L("다음 →", "Next →"), .next),
+        ("close_button", L("닫기", "Close"), .close),
+        ("expand_button", L("펼치기", "More"), nil),
     ]
-    private static let secondary: [(String, String, ViewerCommand)] = [
-        ("open_archive_button", "ZIP 열기", .openArchive),
-        ("previous_folder_button", "이전 폴더", .previousFolder),
-        ("next_folder_button", "다음 폴더", .nextFolder),
-        ("previous_archive_button", "↑ 이전 묶음", .previousBundle),
-        ("next_archive_button", "↓ 다음 묶음", .nextBundle),
-        ("refresh_button", "새로고침", .refresh),
-        ("fit_button", "화면 맞춤", .fit),
-        ("actual_size_button", "100%", .actualSize),
-        ("zoom_out_button", "축소 −", .zoomOut),
-        ("zoom_in_button", "확대 +", .zoomIn),
-        ("fullscreen_button", "전체화면", .fullscreen),
-        ("issues_button", "오류 0", .issues),
-        ("help_button", "도움말", .help),
-        ("cancel_scan_button", "스캔 취소", .cancelScan),
-        ("minimize_button", "최소화", .minimize),
+    private static let secondary: [(String, LocalizedText, ViewerCommand)] = [
+        ("open_archive_button", L("ZIP 열기", "Open ZIP"), .openArchive),
+        ("previous_folder_button", L("이전 폴더", "Previous Folder"), .previousFolder),
+        ("next_folder_button", L("다음 폴더", "Next Folder"), .nextFolder),
+        ("previous_archive_button", L("↑ 이전 묶음", "↑ Previous Set"), .previousBundle),
+        ("next_archive_button", L("↓ 다음 묶음", "↓ Next Set"), .nextBundle),
+        ("refresh_button", L("새로고침", "Refresh"), .refresh),
+        ("fit_button", L("화면 맞춤", "Fit"), .fit),
+        ("actual_size_button", LocalizedText(verbatim: "100%"), .actualSize),
+        ("zoom_out_button", L("축소 −", "Zoom Out −"), .zoomOut),
+        ("zoom_in_button", L("확대 +", "Zoom In +"), .zoomIn),
+        ("fullscreen_button", L("전체화면", "Full Screen"), .fullscreen),
+        ("issues_button", L("오류", "Issues"), .issues),
+        ("help_button", L("도움말", "Help"), .help),
+        ("cancel_scan_button", L("스캔 취소", "Cancel Scan"), .cancelScan),
+        ("minimize_button", L("최소화", "Minimize"), .minimize),
     ]
 
     override init(frame frameRect: NSRect) {
@@ -62,12 +65,11 @@ final class ControlsPanel: NSVisualEffectView {
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 90).isActive = true
         for encoding in NameEncoding.allCases {
-            encodingPopup.addItem(withTitle: "ZIP 이름: \(Self.title(for: encoding))")
+            encodingPopup.addItem(withTitle: encoding.rawValue)
             encodingPopup.lastItem?.representedObject = encoding.rawValue
         }
         encodingPopup.target = self
         encodingPopup.action = #selector(encodingChosen)
-        encodingPopup.toolTip = "현재 ZIP의 파일명 인코딩"
         secondaryRow.setViews(Self.secondary.map { makeButton($0.0, $0.1, $0.2) } + [encodingPopup], in: .leading)
         secondaryRow.isHidden = true
         for row in [primaryRow, secondaryRow] {
@@ -88,7 +90,7 @@ final class ControlsPanel: NSVisualEffectView {
             column.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         setScanning(false)
-        setIssueCount(0)
+        Localization.shared.observe { [weak self] in self?.relabel() }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -102,9 +104,15 @@ final class ControlsPanel: NSVisualEffectView {
         encodingPopup.isEnabled = !scanning
     }
 
+    func setStatus(_ text: LocalizedText) {
+        status = text
+        statusLabel.stringValue = text.string
+    }
+
     func setIssueCount(_ count: Int) {
-        buttons["issues_button"]?.title = "오류 \(count)"
+        issueCount = count
         buttons["issues_button"]?.isEnabled = count > 0
+        relabel()
     }
 
     func setEnabled(_ enabled: Bool, for names: [String]) {
@@ -116,17 +124,32 @@ final class ControlsPanel: NSVisualEffectView {
     }
 
     func setFullscreenTitle(_ fullscreen: Bool) {
-        buttons["fullscreen_button"]?.title = fullscreen ? "창모드" : "전체화면"
+        isFullscreen = fullscreen
+        relabel()
     }
 
     func toggleExpanded() {
         isExpanded.toggle()
         secondaryRow.isHidden = !isExpanded
-        buttons["expand_button"]?.title = isExpanded ? "접기" : "펼치기"
+        relabel()
     }
 
-    private func makeButton(_ name: String, _ title: String, _ command: ViewerCommand?) -> NSButton {
-        let button = NSButton(title: title, target: self, action: #selector(buttonPressed(_:)))
+    /// Apply the current language to every title, including state-dependent ones.
+    private func relabel() {
+        for (name, title, _) in Self.compact { buttons[name]?.title = title.string }
+        for (name, title, _) in Self.secondary { buttons[name]?.title = title.string }
+        buttons["issues_button"]?.title = "\(L("오류", "Issues").string) \(issueCount)"
+        if isFullscreen { buttons["fullscreen_button"]?.title = L("창모드", "Window").string }
+        if isExpanded { buttons["expand_button"]?.title = L("접기", "Less").string }
+        for (index, encoding) in NameEncoding.allCases.enumerated() {
+            encodingPopup.item(at: index)?.title = "\(L("ZIP 이름", "ZIP names").string): \(Self.title(for: encoding).string)"
+        }
+        encodingPopup.toolTip = L("현재 ZIP의 파일명 인코딩", "File name encoding of the current ZIP").string
+        statusLabel.stringValue = status.string
+    }
+
+    private func makeButton(_ name: String, _ title: LocalizedText, _ command: ViewerCommand?) -> NSButton {
+        let button = NSButton(title: title.string, target: self, action: #selector(buttonPressed(_:)))
         button.bezelStyle = .rounded
         button.controlSize = .small
         button.identifier = NSUserInterfaceItemIdentifier(name)
@@ -153,11 +176,11 @@ final class ControlsPanel: NSVisualEffectView {
         onEncodingChange?(encoding)
     }
 
-    private static func title(for encoding: NameEncoding) -> String {
+    private static func title(for encoding: NameEncoding) -> LocalizedText {
         switch encoding {
-        case .auto: return "자동"
-        case .cp949: return "CP949"
-        case .cp437: return "CP437"
+        case .auto: return L("자동", "Automatic")
+        case .cp949: return LocalizedText(verbatim: "CP949")
+        case .cp437: return LocalizedText(verbatim: "CP437")
         }
     }
 }

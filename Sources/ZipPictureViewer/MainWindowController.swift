@@ -5,6 +5,14 @@ import ViewerCore
 /// whichever control last had focus.
 final class ViewerWindow: NSWindow {
     var onKeyDown: ((NSEvent) -> Bool)?
+    var onMouseMoved: (() -> Void)?
+
+    /// Mouse moves that reach the window (it is the first responder) also
+    /// reveal the floating panels.
+    override func mouseMoved(with event: NSEvent) {
+        onMouseMoved?()
+        super.mouseMoved(with: event)
+    }
 
     override func keyDown(with event: NSEvent) {
         if onKeyDown?(event) != true {
@@ -77,7 +85,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         ])
         root.onDrop = { [weak self] url in self?.opener.open(url) }
         root.onMouseMoved = { [weak self] in self?.revealPanels() }
-        canvas.onMouseMoved = { [weak self] in self?.revealPanels() }
+        (window as? ViewerWindow)?.onMouseMoved = { [weak self] in self?.revealPanels() }
         setPanelsVisible(false)
         window.initialFirstResponder = canvas
     }
@@ -130,7 +138,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private func present(_ move: ViewerModel.MoveResult) {
         switch move {
         case .moved: display.showCurrent()
-        case .waiting: controls.statusLabel.stringValue = "\(model.state.positionLabel)  ·  다음 항목 읽는 중…"
+        case .waiting:
+            controls.setStatus(LocalizedText(verbatim: model.state.positionLabel)
+                .joined(with: L("다음 항목 읽는 중…", "Reading the next item…")))
         case .unchanged: break
         }
     }
@@ -162,8 +172,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         if issuePanel.isVisible { issuePanel.setMessages(issueMessages()) }
     }
 
-    private func showTransientStatus(_ message: String) {
-        controls.statusLabel.stringValue = message
+    private func showTransientStatus(_ message: LocalizedText) {
+        controls.setStatus(message)
         revealPanels()
     }
 
@@ -235,8 +245,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 }
 
 extension MainWindowController: SourceLoaderDelegate {
-    func sourceLoader(_ loader: SourceLoader, statusChanged message: String) {
-        controls.statusLabel.stringValue = message
+    func sourceLoader(_ loader: SourceLoader, statusChanged message: LocalizedText) {
+        controls.setStatus(message)
     }
 
     func sourceLoader(_ loader: SourceLoader, scanningChanged scanning: Bool) {
@@ -252,12 +262,12 @@ extension MainWindowController: SourceLoaderDelegate {
         display.reset()
         updateIssues()
         if result.entries.isEmpty {
-            let message = !result.issues.isEmpty ? "이미지 컨테이너를 읽지 못했습니다"
-                : result.discoveredFiles == 0 ? "빈 폴더입니다"
-                : "지원되는 이미지 형식이 없습니다"
+            let message = !result.issues.isEmpty ? L("이미지 컨테이너를 읽지 못했습니다", "Could not read any image container")
+                : result.discoveredFiles == 0 ? L("빈 폴더입니다", "The folder is empty")
+                : L("지원되는 이미지 형식이 없습니다", "No supported images found")
             canvas.showMessage(message)
             info.text = context.logicalPath.path
-            controls.statusLabel.stringValue = "0 / 0"
+            controls.setStatus(LocalizedText(verbatim: "0 / 0"))
             updateNavigation()
             return
         }
@@ -267,12 +277,12 @@ extension MainWindowController: SourceLoaderDelegate {
     func sourceLoader(_ loader: SourceLoader, extended context: SourceContext, result: ScanResult) {
         updateIssues()
         updateNavigation()
-        let scanning = model.isScanning ? "  ·  스캔 중…" : ""
-        controls.statusLabel.stringValue = model.state.positionLabel + scanning
+        let position = LocalizedText(verbatim: model.state.positionLabel)
+        controls.setStatus(model.isScanning ? position.joined(with: L("스캔 중…", "Scanning…")) : position)
         present(model.retryPendingMove())
     }
 
-    func sourceLoader(_ loader: SourceLoader, rejected message: String) {
+    func sourceLoader(_ loader: SourceLoader, rejected message: LocalizedText) {
         showTransientStatus(message)
         updateNavigation()
     }
@@ -284,13 +294,13 @@ extension MainWindowController: DisplayControllerDelegate {
             controls.selectEncoding(loader.encoding(for: context, entry: entry))
         }
         info.text = "\(entry.container.path)  |  \(entry.memberName)"
-        controls.statusLabel.stringValue = model.state.positionLabel
+        controls.setStatus(LocalizedText(verbatim: model.state.positionLabel))
         updateNavigation()
         schedulePositionSave()
     }
 
-    func display(_ display: DisplayController, statusChanged message: String) {
-        controls.statusLabel.stringValue = message
+    func display(_ display: DisplayController, statusChanged message: LocalizedText) {
+        controls.setStatus(message)
     }
 
     func displayErrorsChanged(_ display: DisplayController) {

@@ -12,7 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
-        NSApp.mainMenu = MainMenu.build()
+        Localization.shared.observe { NSApp.mainMenu = MainMenu.build() }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -64,6 +64,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func zoomOut(_ sender: Any?) { windowController?.perform(.zoomOut) }
     @objc func showIssues(_ sender: Any?) { windowController?.perform(.issues) }
     @objc func showHelp(_ sender: Any?) { windowController?.perform(.help) }
+
+    @objc func chooseLanguage(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let language = AppLanguage(rawValue: raw) else { return }
+        Localization.shared.setPreference(language)
+    }
 }
 
 /// Command-line options. AppKit's own `-NS…`/`-psn_…` arguments are ignored.
@@ -80,8 +85,11 @@ struct LaunchOptions {
             } else if argument == "--automation-handshake", let value = remaining.popFirst() {
                 automationHandshake = URL(fileURLWithPath: value)
             } else if argument.hasPrefix("-") {
-                // AppKit options such as -NSDocumentRevisionsDebugMode take a value.
-                if argument.hasPrefix("-NS"), !remaining.isEmpty { remaining.removeFirst() }
+                // "-Key value" sets a user default for this run (e.g.
+                // -AppLanguage en); macOS's own "-psn_…" has no value.
+                if !argument.hasPrefix("--"), !argument.hasPrefix("-psn_"), !remaining.isEmpty {
+                    remaining.removeFirst()
+                }
             } else if startupPath == nil {
                 startupPath = URL(fileURLWithPath: argument)
             }
@@ -90,49 +98,70 @@ struct LaunchOptions {
 }
 
 enum MainMenu {
+    /// Rebuilt whenever the language changes.
     static func build() -> NSMenu {
         let main = NSMenu()
-        let appName = "Zip Picture Viewer"
-        main.addItem(submenu("ZipPictureViewer", [
-            item("\(appName) 정보", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), ""),
+        let appName = "ZipPictureViewer"
+        main.addItem(submenu(LocalizedText(verbatim: appName), [
+            item(L("\(appName) 정보", "About \(appName)"), #selector(NSApplication.orderFrontStandardAboutPanel(_:)), ""),
             .separator(),
-            item("\(appName) 가리기", #selector(NSApplication.hide(_:)), "h"),
-            item("\(appName) 종료", #selector(NSApplication.terminate(_:)), "q"),
+            languageMenu(),
+            .separator(),
+            item(L("\(appName) 가리기", "Hide \(appName)"), #selector(NSApplication.hide(_:)), "h"),
+            item(L("\(appName) 종료", "Quit \(appName)"), #selector(NSApplication.terminate(_:)), "q"),
         ]))
-        main.addItem(submenu("파일", [
-            item("폴더 열기…", #selector(AppDelegate.openFolder(_:)), "o"),
-            item("ZIP/CBZ 열기…", #selector(AppDelegate.openArchive(_:)), "O"),
-            item("새로고침", #selector(AppDelegate.refreshSource(_:)), "r"),
+        main.addItem(submenu(L("파일", "File"), [
+            item(L("폴더 열기…", "Open Folder…"), #selector(AppDelegate.openFolder(_:)), "o"),
+            item(L("ZIP/CBZ 열기…", "Open ZIP/CBZ…"), #selector(AppDelegate.openArchive(_:)), "O"),
+            item(L("새로고침", "Refresh"), #selector(AppDelegate.refreshSource(_:)), "r"),
             .separator(),
-            item("창 닫기", #selector(NSWindow.performClose(_:)), "w"),
+            item(L("창 닫기", "Close Window"), #selector(NSWindow.performClose(_:)), "w"),
         ]))
-        main.addItem(submenu("보기", [
-            item("화면 맞춤", #selector(AppDelegate.fitImage(_:)), "0"),
-            item("실제 크기", #selector(AppDelegate.actualSize(_:)), "1"),
-            item("확대", #selector(AppDelegate.zoomIn(_:)), "+"),
-            item("축소", #selector(AppDelegate.zoomOut(_:)), "-"),
+        main.addItem(submenu(L("보기", "View"), [
+            item(L("화면 맞춤", "Fit to Window"), #selector(AppDelegate.fitImage(_:)), "0"),
+            item(L("실제 크기", "Actual Size"), #selector(AppDelegate.actualSize(_:)), "1"),
+            item(L("확대", "Zoom In"), #selector(AppDelegate.zoomIn(_:)), "+"),
+            item(L("축소", "Zoom Out"), #selector(AppDelegate.zoomOut(_:)), "-"),
             .separator(),
-            item("읽지 못한 항목", #selector(AppDelegate.showIssues(_:)), ""),
+            item(IssuePanel.windowTitle, #selector(AppDelegate.showIssues(_:)), ""),
             fullScreenItem(),
         ]))
-        main.addItem(submenu("도움말", [item("단축키 도움말", #selector(AppDelegate.showHelp(_:)), "?")]))
+        main.addItem(submenu(L("도움말", "Help"), [item(HelpPanel.windowTitle, #selector(AppDelegate.showHelp(_:)), "?")]))
         return main
     }
 
-    private static func submenu(_ title: String, _ items: [NSMenuItem]) -> NSMenuItem {
-        let container = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        let menu = NSMenu(title: title)
+    /// Named in both languages so it can be found whichever is active.
+    static let languageTitle = "언어 (Language)"
+
+    private static func languageMenu() -> NSMenuItem {
+        let choices: [(AppLanguage, String)] = [
+            (.system, L("시스템 설정 따름", "System Default").string),
+            (.korean, "한국어"),
+            (.english, "English"),
+        ]
+        let items = choices.map { language, title -> NSMenuItem in
+            let item = NSMenuItem(title: title, action: #selector(AppDelegate.chooseLanguage(_:)), keyEquivalent: "")
+            item.representedObject = language.rawValue
+            item.state = Localization.shared.preference == language ? .on : .off
+            return item
+        }
+        return submenu(LocalizedText(verbatim: languageTitle), items)
+    }
+
+    private static func submenu(_ title: LocalizedText, _ items: [NSMenuItem]) -> NSMenuItem {
+        let container = NSMenuItem(title: title.string, action: nil, keyEquivalent: "")
+        let menu = NSMenu(title: title.string)
         items.forEach(menu.addItem)
         container.submenu = menu
         return container
     }
 
-    private static func item(_ title: String, _ action: Selector, _ key: String) -> NSMenuItem {
-        NSMenuItem(title: title, action: action, keyEquivalent: key)
+    private static func item(_ title: LocalizedText, _ action: Selector, _ key: String) -> NSMenuItem {
+        NSMenuItem(title: title.string, action: action, keyEquivalent: key)
     }
 
     private static func fullScreenItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "전체 화면", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        let item = NSMenuItem(title: L("전체 화면", "Enter Full Screen").string, action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         item.keyEquivalentModifierMask = [.command, .control]
         return item
     }

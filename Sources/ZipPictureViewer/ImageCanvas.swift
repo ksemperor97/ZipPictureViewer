@@ -7,13 +7,14 @@ final class ImageCanvas: NSScrollView {
     var onActualSizeRequested: (() -> Void)?
     /// Called when zoom or viewport changes so a sharper image can be loaded.
     var onViewChanged: (() -> Void)?
-    var onAnimationFailed: ((String) -> Void)?
-    var onMouseMoved: (() -> Void)?
+    /// Called with the ImageIO status code when GIF playback cannot start.
+    var onAnimationFailed: ((Int) -> Void)?
 
     private let imageView = NSImageView()
     private let messageLabel = NSTextField(labelWithString: "")
     private(set) var fitMode = true
     private(set) var hasImage = false
+    private var messageText: LocalizedText?
     private var animation: AnimationToken?
 
     override init(frame frameRect: NSRect) {
@@ -33,14 +34,13 @@ final class ImageCanvas: NSScrollView {
         messageLabel.alignment = .center
         messageLabel.font = .systemFont(ofSize: 15)
         messageLabel.maximumNumberOfLines = 0
-        messageLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(messageLabel)
-        NSLayoutConstraint.activate([
-            messageLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-            messageLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            messageLabel.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -40),
-        ])
-        showMessage("폴더 열기 또는 드래그")
+        showMessage(L("폴더 열기 또는 드래그", "Open a folder or drop one here"))
+        Localization.shared.observe { [weak self] in
+            guard let self, let text = self.messageText else { return }
+            self.messageLabel.stringValue = text.string
+            self.layoutMessage()
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -96,19 +96,39 @@ final class ImageCanvas: NSScrollView {
             self?.imageView.image = NSImage(cgImage: frame, size: originalSize)
         }
         if status != noErr {
-            onAnimationFailed?("GIF 재생 오류: \(status)")
+            onAnimationFailed?(Int(status))
         }
     }
 
     var isAnimating: Bool { animation.map { !$0.stopped } ?? false }
 
-    func showMessage(_ text: String) {
+    /// NSScrollView lays out its own subviews, so the message is placed here
+    /// (Auto Layout constraints on it never produced a visible frame).
+    override func tile() {
+        super.tile()
+        layoutMessage()
+    }
+
+    private func layoutMessage() {
+        let available = NSSize(width: max(bounds.width - 40, 1), height: bounds.height)
+        let size = messageLabel.sizeThatFits(available)
+        messageLabel.frame = NSRect(
+            x: (bounds.width - size.width) / 2,
+            y: (bounds.height - size.height) / 2,
+            width: size.width,
+            height: size.height
+        ).integral
+    }
+
+    func showMessage(_ text: LocalizedText) {
+        messageText = text
         stopAnimation()
         imageView.image = nil
         imageView.isHidden = true
         hasImage = false
-        messageLabel.stringValue = text
+        messageLabel.stringValue = text.string
         messageLabel.isHidden = false
+        layoutMessage()
         fitMode = true
         magnification = 1
     }
@@ -176,11 +196,6 @@ final class ImageCanvas: NSScrollView {
             return
         }
         super.mouseDown(with: event)
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        onMouseMoved?()
-        super.mouseMoved(with: event)
     }
 
     /// Rendered colour at a fractional position, as "#rrggbb" in sRGB.

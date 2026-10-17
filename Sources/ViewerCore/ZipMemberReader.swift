@@ -46,7 +46,7 @@ public enum ZipMemberReader {
     ) throws -> Data {
         try checkLimits(location, limits: limits)
         if entry.encryption == .aes {
-            throw ZipError(.unsupported, "AES 방식으로 암호화된 ZIP은 지원하지 않습니다.")
+            throw ZipError(.encryptionUnsupported, "AES-encrypted ZIP members are not supported.")
         }
         let handle = try FileHandle(forReadingFrom: entry.container)
         defer { try? handle.close() }
@@ -90,7 +90,7 @@ public enum ZipMemberReader {
         password: Data?
     ) throws -> Data {
         guard let password else {
-            throw ZipError(.passwordRequired, "ZIP 암호가 필요합니다.")
+            throw ZipError(.passwordRequired, "A ZIP password is required.")
         }
         guard payload.count >= 12 else { throw ZipError(.badZip, "Encrypted data is truncated") }
         var cipher = ZipCrypto(password: password)
@@ -101,7 +101,7 @@ public enum ZipMemberReader {
             ? UInt8(location.modTime >> 8)
             : UInt8((entry.memberID?.crc ?? 0) >> 24)
         guard plain[plain.startIndex + 11] == check else {
-            throw ZipError(.wrongPassword, "ZIP 암호가 올바르지 않습니다.")
+            throw ZipError(.wrongPassword, "The ZIP password is incorrect.")
         }
         return plain.subdata(in: (plain.startIndex + 12)..<plain.endIndex)
     }
