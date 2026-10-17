@@ -22,7 +22,19 @@ def run_app(
         from .automation import AutomationServer
 
         AutomationServer(window, Path(automation_handshake))
+    startup_path = _startup_path(app.arguments()[1:])
+    if startup_path is not None:
+        window.open_path(startup_path)
     return app.exec()
+
+
+def _startup_path(arguments: Sequence[str]) -> Path | None:
+    """Return the first path argument; QApplication already removed Qt options."""
+
+    for argument in arguments:
+        if not argument.startswith("-"):
+            return Path(argument)
+    return None
 
 
 __all__ = ["MainWindow", "run_app"]

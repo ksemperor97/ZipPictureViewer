@@ -141,5 +141,32 @@ app = BUNDLE(
         'CFBundleVersion': APP_VERSION,
         'LSMinimumSystemVersion': TARGET_MACOS_VERSION,
         'NSHighResolutionCapable': True,
+        # "Alternate" lists the app under Finder's Open With without taking
+        # over the default handler for these types.
+        'CFBundleDocumentTypes': [
+            {
+                'CFBundleTypeName': 'ZIP Archive',
+                'CFBundleTypeRole': 'Viewer',
+                'LSHandlerRank': 'Alternate',
+                'LSItemContentTypes': [
+                    'public.zip-archive',
+                    'com.ksemperor97.zippictureviewer.cbz',
+                ],
+            },
+            {
+                'CFBundleTypeName': 'Folder',
+                'CFBundleTypeRole': 'Viewer',
+                'LSHandlerRank': 'Alternate',
+                'LSItemContentTypes': ['public.folder'],
+            },
+        ],
+        'UTImportedTypeDeclarations': [
+            {
+                'UTTypeIdentifier': 'com.ksemperor97.zippictureviewer.cbz',
+                'UTTypeDescription': 'Comic Book ZIP Archive',
+                'UTTypeConformsTo': ['public.zip-archive'],
+                'UTTypeTagSpecification': {'public.filename-extension': ['cbz']},
+            },
+        ],
     },
 )

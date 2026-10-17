@@ -147,6 +147,8 @@ class MainWindow(QMainWindow):
 
         if self._closing:
             return
+        # An explicit request supersedes restoring the previous session.
+        self._restore_timer.stop()
         context = FolderContext.from_path(path)
         folder_context = containing_folder_context(context)
         if folder_context is None:
@@ -298,7 +300,15 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
-        if not self._closing and event.type() == QEvent.Type.MouseMove:
+        if self._closing:
+            return super().eventFilter(watched, event)
+        if event.type() == QEvent.Type.FileOpen:
+            # macOS delivers Finder "Open With" and Dock drops this way.
+            self.open_path(Path(event.file()))
+            self.raise_()
+            self.activateWindow()
+            return True
+        if event.type() == QEvent.Type.MouseMove:
             self.overlays.show_temporarily()
         return super().eventFilter(watched, event)
 

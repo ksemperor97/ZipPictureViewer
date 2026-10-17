@@ -11,7 +11,13 @@ from __future__ import annotations
 from typing import Any
 
 from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QTimer, QUrl
-from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent, QMovie
+from PySide6.QtGui import (
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QFileOpenEvent,
+    QMovie,
+)
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QInputDialog, QLineEdit
 
@@ -152,6 +158,15 @@ class AutomationCommands:
         drop = QDropEvent(point, action, mime_data, buttons, modifiers)
         QApplication.sendEvent(target, drop)
         return {"accepted": drop.isAccepted()}
+
+    def cmd_file_open(self, path: str) -> bool:
+        """Deliver the event macOS sends for Finder "Open With" and Dock drops."""
+
+        QTimer.singleShot(
+            0,
+            lambda: QApplication.sendEvent(QApplication.instance(), QFileOpenEvent(path)),
+        )
+        return True
 
     def cmd_answer_dialog(self, text: str = "", accept: bool = True) -> bool:
         dialog = QApplication.activeModalWidget()
