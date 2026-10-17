@@ -153,10 +153,7 @@ def test_zip_name_encoding_can_be_overridden(launch_app, tmp_path) -> None:
     app.wait_for_image("book.zip", "가1.png")
 
     app.click("expand_button")
-    app.click("encoding_combo")
-    app.key("Down")  # 자동 -> CP949
-    app.key("Down")  # CP949 -> CP437
-    app.key("Return")
+    app.call("choose", control="encoding_combo", index=2)  # 자동, CP949, CP437
     state = app.wait_for(
         lambda s: s["member"] not in (None, "가1.png") and s["has_image"],
         "member renamed by the CP437 override",

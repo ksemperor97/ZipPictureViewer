@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -9,6 +11,19 @@ from app_driver import ViewerApp
 
 
 LaunchApp = Callable[..., ViewerApp]
+
+
+@pytest.fixture(scope="session", autouse=True)
+def built_app() -> None:
+    """Build the debug app once per run unless a packaged app is under test."""
+
+    if os.environ.get("ZPV_E2E_APP"):
+        return
+    env = dict(os.environ)
+    if "DEVELOPER_DIR" not in env and Path("/Applications/Xcode.app").exists():
+        env["DEVELOPER_DIR"] = "/Applications/Xcode.app/Contents/Developer"
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(["swift", "build"], cwd=root, env=env, check=True)
 
 
 @pytest.fixture
