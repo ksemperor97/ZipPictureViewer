@@ -55,7 +55,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ZipPictureViewer-mac
-          path: |
-            dist/ZipPictureViewer-v*-mac.zip
-            dist/ZipPictureViewer-v*-mac.zip.sha256
+          path: dist/ZipPictureViewer-v*-mac.zip
           if-no-files-found: error
