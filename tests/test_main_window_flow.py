@@ -3,8 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from PySide6.QtCore import QMimeData, QUrl
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtCore import QPoint, QPointF, QMimeData, QUrl, Qt
+from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QImage
+from PySide6.QtWidgets import QApplication
 
 from zippictureviewer.session_store import SessionStore
 from zippictureviewer.models import ScanIssue
@@ -81,6 +82,48 @@ def test_direct_archive_and_drop_use_the_same_source_path(
     assert window.current_context.source_kind == "archive"
     assert window.current_root == archive_path
     assert window.state.current_entry.member_name == "page.png"
+
+
+def test_image_surface_routes_file_drops_to_main_window(
+    qtbot,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    archive_path = tmp_path / "book.zip"
+    archive_path.write_bytes(b"placeholder")
+    window = _window(qtbot, monkeypatch, tmp_path)
+    loaded_sources: list[Path] = []
+    monkeypatch.setattr(window, "load_source", loaded_sources.append)
+
+    receiver = window.image_view.viewport()
+    while receiver is not None and not receiver.acceptDrops():
+        receiver = receiver.parentWidget()
+
+    assert receiver is window
+
+    mime_data = QMimeData()
+    mime_data.setUrls([QUrl.fromLocalFile(str(archive_path))])
+    drag_event = QDragEnterEvent(
+        QPoint(10, 10),
+        Qt.DropAction.CopyAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    drop_event = QDropEvent(
+        QPointF(10, 10),
+        Qt.DropAction.CopyAction,
+        mime_data,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+    QApplication.sendEvent(receiver, drag_event)
+    QApplication.sendEvent(receiver, drop_event)
+
+    assert drag_event.isAccepted()
+    assert drop_event.isAccepted()
+    assert loaded_sources == [archive_path]
 
 
 def test_empty_and_unsupported_folders_have_distinct_messages(

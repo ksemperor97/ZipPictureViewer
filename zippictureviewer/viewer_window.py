@@ -50,6 +50,9 @@ class MainWindow(QMainWindow):
         self.position_saver = PositionSaver(self.session_store, parent=self)
 
         self.image_view = ImageView()
+        # QGraphicsView accepts drops by default, which would consume file drops
+        # before MainWindow can validate and load them.
+        self.image_view.setAcceptDrops(False)
         self.presenter = ImagePresenter(self.controller, self.image_view, self)
         # Compatibility aliases for integrations using the original fields.
         self.image_cache = self.presenter.cache
