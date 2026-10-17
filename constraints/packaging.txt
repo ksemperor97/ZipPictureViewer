@@ -1,5 +1,0 @@
-# Pin a universal2 wheel whose Mach-O load commands support macOS 13.
-PySide6==6.8.3
-
-# Keep the generated bundle layout stable for the pruning validators.
-pyinstaller==6.20.0
