@@ -32,6 +32,7 @@ final class AutomationCommands {
             DispatchQueue.main.async { NSApp.delegate?.application?(NSApp, open: [url]) }
             return true
         case "choose": return try choose(params["control"] as? String ?? "", index: params["index"] as? Int ?? 0)
+        case "choose_menu": return try chooseMenu(params["path"] as? [String] ?? [])
         case "answer_dialog": return try answerDialog(text: params["text"] as? String ?? "", accept: params["accept"] as? Bool ?? true)
         case "activate":
             NSApp.activate(ignoringOtherApps: true)
@@ -51,6 +52,7 @@ final class AutomationCommands {
         let mainWindow = window
         return [
             "visible": mainWindow.isVisible,
+            "window_number": mainWindow.windowNumber,
             "first_responder": mainWindow.firstResponder.map { String(describing: type(of: $0)) } ?? NSNull(),
             "active": NSApp.isActive && mainWindow.isKeyWindow,
             "fullscreen": controller.isFullScreen,
@@ -72,6 +74,12 @@ final class AutomationCommands {
             "zoom": (Double(canvas.magnification) * 10_000).rounded() / 10_000,
             "controls_visible": !controller.controls.isHidden,
             "modal_title": mainWindow.attachedSheet?.title ?? NSNull(),
+            "dialog_windows": Dictionary(
+                NSApp.windows
+                    .filter { $0 !== mainWindow && $0.isVisible && !$0.isSheet && !$0.title.isEmpty }
+                    .map { ($0.title, $0.windowNumber) },
+                uniquingKeysWith: { first, _ in first }
+            ),
             "dialogs": NSApp.windows
                 .filter { $0 !== mainWindow && $0.isVisible && !$0.isSheet && !$0.title.isEmpty }
                 .map(\.title)
@@ -183,6 +191,22 @@ final class AutomationCommands {
         return true
     }
 
+    /// Pick a menu bar item by its titles, as clicking through the menus does.
+    private func chooseMenu(_ path: [String]) throws -> Bool {
+        var menu = NSApp.mainMenu
+        for (depth, title) in path.enumerated() {
+            guard let current = menu, let index = current.items.firstIndex(where: { $0.title == title }) else {
+                throw AutomationError("Menu item not found: \(path[...depth].joined(separator: " > "))")
+            }
+            if depth == path.count - 1 {
+                DispatchQueue.main.async { current.performActionForItem(at: index) }
+                return true
+            }
+            menu = current.items[index].submenu
+        }
+        throw AutomationError("Empty menu path")
+    }
+
     private func answerDialog(text: String, accept: Bool) throws -> Bool {
         guard let sheet = window.attachedSheet, let content = sheet.contentView else {
             throw AutomationError("No dialog is open")
@@ -190,7 +214,8 @@ final class AutomationCommands {
         let field: NSSecureTextField? = descendants(of: content).first
         field?.stringValue = text
         let buttons: [NSButton] = descendants(of: content)
-        guard let button = buttons.first(where: { $0.title == (accept ? "확인" : "취소") }) else {
+        let title = (accept ? L("확인", "OK") : L("취소", "Cancel")).string
+        guard let button = buttons.first(where: { $0.title == title }) else {
             throw AutomationError("Dialog button not found")
         }
         DispatchQueue.main.async { button.performClick(nil) }

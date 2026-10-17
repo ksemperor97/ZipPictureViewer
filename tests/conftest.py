@@ -43,6 +43,7 @@ def launch_app(tmp_path: Path, config_dir: Path) -> Iterator[LaunchApp]:
         *args: str | Path,
         env: dict[str, str] | None = None,
         finder_files: list[Path] | None = None,
+        language: str | None = "ko",
     ) -> ViewerApp:
         app = ViewerApp(
             tmp_path,
@@ -50,6 +51,7 @@ def launch_app(tmp_path: Path, config_dir: Path) -> Iterator[LaunchApp]:
             [str(arg) for arg in args],
             env,
             finder_files,
+            language,
         )
         apps.append(app)
         return app.start()

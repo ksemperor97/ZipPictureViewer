@@ -37,12 +37,16 @@ class ViewerApp:
         args: list[str],
         extra_env: dict[str, str] | None = None,
         finder_files: list[Path] | None = None,
+        language: str | None = "ko",
     ) -> None:
         self.work_dir = work_dir
         self.config_dir = config_dir
         self.args = args
         self.extra_env = extra_env or {}
         self.finder_files = finder_files
+        # Scenarios assert Korean text unless they choose a language; None
+        # leaves the app's own preference (system language) in effect.
+        self.language = language
         self.app_pid: int | None = None
         self.log_path = work_dir / "app.log"
         self.process: subprocess.Popen | None = None
@@ -55,7 +59,8 @@ class ViewerApp:
         env["ZIP_PICTURE_VIEWER_CONFIG_DIR"] = str(self.config_dir)
         env["ZIP_PICTURE_VIEWER_AUTOMATION_KEY"] = key
         env.update(self.extra_env)
-        app_arguments = ["--automation-handshake", str(handshake), *self.args]
+        language_arguments = ["-AppLanguage", self.language] if self.language else []
+        app_arguments = ["--automation-handshake", str(handshake), *language_arguments, *self.args]
         if self.finder_files is None:
             command = [*app_command(), *app_arguments]
         else:
