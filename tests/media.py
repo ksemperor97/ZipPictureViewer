@@ -195,3 +195,44 @@ def _crc_table() -> list[int]:
 
 
 _CRC_TABLE = _crc_table()
+
+
+def write_zip64_locator_only(path: Path, record_offset: int) -> Path:
+    """A ZIP whose end record defers to a ZIP64 record at ``record_offset``."""
+
+    locator = struct.pack("<IIQI", 0x07064B50, 0, record_offset, 1)
+    end = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0xFFFF, 0xFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(locator + end)
+    return path
+
+
+def write_zip64_member(
+    path: Path,
+    name: str,
+    *,
+    uncompressed: int,
+    compressed: int,
+    offset: int | None = None,
+    method: int = 8,
+) -> Path:
+    """One member whose ZIP64 extra field declares the given sizes.
+
+    A real local header is written at offset 0 so readers get past the
+    header check; ``offset`` overrides the declared local header offset.
+    """
+
+    raw_name = name.encode()
+    local = struct.pack(
+        "<IHHHHHIIIHH", 0x04034B50, 45, 0x0800, method, 0, 0x21,
+        0, 0xFFFFFFFF, 0xFFFFFFFF, len(raw_name), 0,
+    ) + raw_name
+    extra = struct.pack("<HHQQQ", 0x0001, 24, uncompressed, compressed, offset or 0)
+    central = struct.pack(
+        "<IHHHHHHIIIHHHHHII", 0x02014B50, 45, 45, 0x0800, method, 0, 0x21,
+        0, 0xFFFFFFFF, 0xFFFFFFFF, len(raw_name), len(extra), 0, 0, 0, 0, 0xFFFFFFFF,
+    ) + raw_name + extra
+    end = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 1, 1, len(central), len(local), 0)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(local + central + end)
+    return path
