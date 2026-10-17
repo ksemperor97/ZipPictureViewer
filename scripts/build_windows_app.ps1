@@ -37,7 +37,7 @@ if ($LASTEXITCODE -ne 0) {
 python scripts/generate_app_icon.py
 python -m PyInstaller --noconfirm --clean ZipPictureViewer-windows.spec
 
-$QtDir = Join-Path $AppDir "_internal/PySide6/Qt"
+$QtDir = Join-Path $AppDir "_internal/PySide6"
 $RemovePaths = @(
     "$QtDir/translations",
     "$QtDir/qml",

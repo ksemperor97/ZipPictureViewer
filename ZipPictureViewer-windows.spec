@@ -120,13 +120,13 @@ a.binaries = [
     item
     for item in a.binaries
     if not (
-        'Qt/translations' in item[0].replace('\\', '/')
-        or 'Qt/plugins/tls' in item[0].replace('\\', '/')
-        or 'Qt/plugins/bearer' in item[0].replace('\\', '/')
-        or 'Qt/plugins/networkinformation' in item[0].replace('\\', '/')
-        or 'Qt/plugins/sqldrivers' in item[0].replace('\\', '/')
-        or 'Qt/plugins/qmltooling' in item[0].replace('\\', '/')
-        or 'Qt/plugins/printsupport' in item[0].replace('\\', '/')
+        'PySide6/translations' in item[0].replace('\\', '/')
+        or 'PySide6/plugins/tls' in item[0].replace('\\', '/')
+        or 'PySide6/plugins/bearer' in item[0].replace('\\', '/')
+        or 'PySide6/plugins/networkinformation' in item[0].replace('\\', '/')
+        or 'PySide6/plugins/sqldrivers' in item[0].replace('\\', '/')
+        or 'PySide6/plugins/qmltooling' in item[0].replace('\\', '/')
+        or 'PySide6/plugins/printsupport' in item[0].replace('\\', '/')
     )
 ]
 a.datas = [
