@@ -114,7 +114,9 @@ def _find_same_folder_index(folders: list[Path], target: Path) -> int | None:
 
 
 def _same_folder(left: Path, right: Path) -> bool:
+    # A case-insensitive string comparison would be wrong on case-sensitive
+    # file systems, so a folder that cannot be stat'ed simply does not match.
     try:
         return left.samefile(right)
     except OSError:
-        return str(left).casefold() == str(right).casefold()
+        return False

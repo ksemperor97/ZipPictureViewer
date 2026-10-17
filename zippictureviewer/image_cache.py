@@ -49,7 +49,7 @@ class ImageCache:
             self._total_bytes = 0
 
     def invalidate_source(self, source_path: Path) -> None:
-        source_key = _normal_source_key(source_path)
+        source_key = source_path
         with self._lock:
             for entry, item in list(self._items.items()):
                 if item.source_key == source_key:
@@ -131,8 +131,4 @@ class ImageCache:
 
 
 def _source_key(entry: ImageEntry) -> Path:
-    return _normal_source_key(entry.source_path)
-
-
-def _normal_source_key(path: Path) -> Path:
-    return Path(path).expanduser().absolute()
+    return entry.source_path

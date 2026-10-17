@@ -11,7 +11,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from .folder_context import FolderContext
+from .folder_context import FolderContext, resolve_path
 from .models import ArchiveMemberId, ImageEntry
 
 
@@ -168,8 +168,8 @@ class SessionStore:
         return matching_container[0]
 
     def _container_id(self, context: FolderContext, archive_path: Path) -> str:
-        archive_access_path = _resolve_for_identity(archive_path)
-        root_access_path = _resolve_for_identity(context.access_path)
+        archive_access_path = resolve_path(archive_path)
+        root_access_path = resolve_path(context.access_path)
 
         if context.source_kind == "archive" and archive_access_path == root_access_path:
             return "."
@@ -347,13 +347,6 @@ def _unlock_file(stream) -> None:
     import fcntl
 
     fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
-
-
-def _resolve_for_identity(path: Path) -> Path:
-    try:
-        return Path(path).resolve(strict=False)
-    except (OSError, RuntimeError):
-        return Path(path)
 
 
 def _serialize_member_id(entry: ImageEntry) -> SerializedMemberId:

@@ -142,3 +142,23 @@ def test_refresh_of_a_deleted_folder_keeps_the_current_view(launch_app, tmp_path
     state = app.wait_for(lambda s: "열 수 없" in s["status"], "rejection status")
     assert state["source"] == str(collection)
     assert state["has_image"]
+
+
+def test_zip_name_encoding_can_be_overridden(launch_app, tmp_path) -> None:
+    collection = tmp_path / "korean"
+    page = png_bytes(GREEN)
+    write_raw_zip(collection / "book.zip", [("가1.png".encode("cp949"), page, 0, 0)])
+    app = launch_app()
+    app.drop(collection / "book.zip")
+    app.wait_for_image("book.zip", "가1.png")
+
+    app.click("expand_button")
+    app.click("encoding_combo")
+    app.key("Down")  # 자동 -> CP949
+    app.key("Down")  # CP949 -> CP437
+    app.key("Return")
+    state = app.wait_for(
+        lambda s: s["member"] not in (None, "가1.png") and s["has_image"],
+        "member renamed by the CP437 override",
+    )
+    assert state["member"] == "가1.png".encode("cp949").decode("cp437")

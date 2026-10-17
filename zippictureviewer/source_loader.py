@@ -96,8 +96,10 @@ class SourceLoader(QObject):
         entry: ImageEntry | None = None,
     ) -> MetadataEncoding:
         if entry is not None and entry.is_archive_member:
-            key = _archive_key(entry.archive_path)
-            return self._encoding_overrides.get(key, self.root_encoding(context))
+            return self._encoding_overrides.get(
+                entry.archive_path,
+                self.root_encoding(context),
+            )
         return self.root_encoding(context)
 
     def root_encoding(self, context: FolderContext) -> MetadataEncoding:
@@ -109,7 +111,7 @@ class SourceLoader(QObject):
             return False
         entry = self.controller.state.current_entry
         if entry is not None and entry.is_archive_member:
-            self._encoding_overrides[_archive_key(entry.archive_path)] = encoding
+            self._encoding_overrides[entry.archive_path] = encoding
         else:
             self._source_encodings[context.session_key] = encoding
         return self.load(context)
@@ -196,13 +198,7 @@ def _focus_access_path(context: FolderContext, focus_archive: Path) -> Path:
 def _root_load_failed(context: FolderContext, result: ScanResult) -> bool:
     if not context.is_accessible:
         return True
-    root_path = context.access_path.expanduser().absolute()
     return any(
-        issue.stage == "discover"
-        and issue.target_path.expanduser().absolute() == root_path
+        issue.stage == "discover" and issue.target_path == context.access_path
         for issue in result.issues
     )
-
-
-def _archive_key(path: Path) -> Path:
-    return path.expanduser().absolute()

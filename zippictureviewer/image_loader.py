@@ -194,9 +194,8 @@ def current_source_revision(entry: ImageEntry) -> ContainerRevision:
 
 
 def _resolve_archive_info(archive: ZipFile, entry: ImageEntry) -> ZipInfo:
+    # The scanner always records a member id for archive entries.
     member_id = entry.member_id
-    if member_id is None:
-        return archive.getinfo(entry.member_name)
 
     infos = archive.infolist()
     if 0 <= member_id.record_index < len(infos):
@@ -302,10 +301,7 @@ def _validate_decoded_image(
 
 
 def _reader_bytes_per_pixel(reader: QImageReader) -> int:
-    image_format_getter = getattr(reader, "imageFormat", None)
-    if image_format_getter is None:
-        return 4
-    image_format = image_format_getter()
+    image_format = reader.imageFormat()
     if image_format == QImage.Format.Format_Invalid:
         return 4
     depth = QImage(1, 1, image_format).depth()

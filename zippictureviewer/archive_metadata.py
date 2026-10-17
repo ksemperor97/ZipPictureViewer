@@ -28,7 +28,7 @@ class ScanOptions:
     """
 
     metadata_encoding: MetadataEncoding = "auto"
-    encoding_overrides: Mapping[Path | str, MetadataEncoding] = field(
+    encoding_overrides: Mapping[Path, MetadataEncoding] = field(
         default_factory=dict
     )
     max_archive_members: int = DEFAULT_MAX_ARCHIVE_MEMBERS
@@ -47,11 +47,7 @@ class ScanOptions:
             raise ValueError("Scan resource limits must be positive")
 
     def encoding_for(self, archive_path: Path) -> MetadataEncoding:
-        target = _absolute_path(archive_path)
-        for path, encoding in self.encoding_overrides.items():
-            if _absolute_path(Path(path)) == target:
-                return encoding
-        return self.metadata_encoding
+        return self.encoding_overrides.get(archive_path, self.metadata_encoding)
 
 
 def read_archive_infos(
@@ -185,6 +181,3 @@ def _cp949_candidate(info: ZipInfo) -> str | None:
         return None
     return candidate
 
-
-def _absolute_path(path: Path) -> Path:
-    return path.expanduser().absolute()

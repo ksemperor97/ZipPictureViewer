@@ -273,8 +273,8 @@ class ImagePresenter(QObject):
                 payload.image,
                 revision=payload.source_revision,
             )
-        except Exception:
-            return
+        except SourceChangedError:
+            return  # a stale preload is simply dropped
 
     def _show_decoded_image(
         self,

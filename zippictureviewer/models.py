@@ -43,9 +43,9 @@ class ArchiveMemberId:
 class ImageEntry:
     archive_path: Path
     member_name: str
+    source_kind: Literal["archive", "folder"]
     member_id: ArchiveMemberId | None = None
     source_revision: ContainerRevision | None = None
-    source_kind: Literal["archive", "folder"] | None = None
     encryption: Literal["zipcrypto", "aes"] | None = None
 
     @property
@@ -70,11 +70,7 @@ class ImageEntry:
 
     @property
     def is_archive_member(self) -> bool:
-        if self.source_kind is not None:
-            return self.source_kind == "archive"
-        if self.member_id is not None:
-            return True
-        return not self.archive_path.is_dir()
+        return self.source_kind == "archive"
 
 
 @dataclass(frozen=True)
