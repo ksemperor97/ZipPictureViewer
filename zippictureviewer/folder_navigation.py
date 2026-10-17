@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .folder_context import ARCHIVE_EXTENSIONS, FolderContext
+from .folder_context import FolderContext
+from .formats import ARCHIVE_EXTENSIONS
 from .natural_sort import natural_sorted
 
 
@@ -29,23 +30,6 @@ def child_folders(folder: NavigationSource) -> list[Path]:
         return []
 
     return natural_sorted(children, key=lambda path: path.name)
-
-
-def first_child_folder(folder: NavigationSource) -> Path | None:
-    children = child_folders(folder)
-    return children[0] if children else None
-
-
-def sibling_folder(folder: NavigationSource, step: int) -> Path | None:
-    """Return a sibling directory while retaining the selected path namespace."""
-
-    logical_path = _logical_path(folder)
-    parent = parent_folder(logical_path)
-    if parent is None:
-        return None
-
-    siblings = child_folders(parent)
-    return _stepped_sibling(logical_path, siblings, step)
 
 
 def sibling_context(context: FolderContext, step: int) -> FolderContext | None:
@@ -78,8 +62,8 @@ def containing_folder_context(archive: FolderContext) -> FolderContext | None:
     a recursive scan there is slow and can trigger OS privacy prompts.
     """
 
-    if archive.source_kind != "archive":
-        return None
+    if archive.source_kind != "archive" or not archive.is_accessible:
+        return None  # a missing archive is reported, not swapped for its folder
     parent = parent_folder(archive)
     if parent is None or _is_broad_scan_root(parent):
         return None
@@ -131,7 +115,9 @@ def _find_same_folder_index(folders: list[Path], target: Path) -> int | None:
 
 
 def _same_folder(left: Path, right: Path) -> bool:
+    # A case-insensitive string comparison would be wrong on case-sensitive
+    # file systems, so a folder that cannot be stat'ed simply does not match.
     try:
         return left.samefile(right)
     except OSError:
-        return str(left).casefold() == str(right).casefold()
+        return False

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -8,17 +9,24 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
-from typing import Any, Sequence
+from typing import Any
 
-from .folder_context import FolderContext, coerce_folder_context
+from .folder_context import FolderContext, resolve_path
 from .models import ArchiveMemberId, ImageEntry
 
 
+_log = logging.getLogger(__name__)
 SESSION_VERSION = 2
 SerializedMemberId = str | dict[str, int]
 
 
+CONFIG_DIR_ENV = "ZIP_PICTURE_VIEWER_CONFIG_DIR"
+
+
 def app_support_dir() -> Path:
+    override = os.environ.get(CONFIG_DIR_ENV)
+    if override:
+        return Path(override)
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "ZipPictureViewer"
 
@@ -67,16 +75,9 @@ class SessionStore:
             return None
         return context
 
-    def last_root(self) -> Path | None:
-        """Return the last logical path (the version 1 compatible API)."""
-
-        context = self.last_context()
-        return context.logical_path if context is not None else None
-
-    def save_root(self, root: Path | FolderContext) -> None:
+    def save_root(self, context: FolderContext) -> None:
         """Persist a successfully opened root, including an empty root."""
 
-        context = coerce_folder_context(root)
         with self._locked_update():
             data = self._read_for_update()
             data["version"] = SESSION_VERSION
@@ -87,31 +88,22 @@ class SessionStore:
 
     def save_position(
         self,
-        root: Path | FolderContext,
+        context: FolderContext,
         entry: ImageEntry,
         index: int,
-        entries: Sequence[ImageEntry] | None = None,
         *,
-        container_index: int | None = None,
+        container_index: int,
     ) -> None:
-        """Save a position while retaining the original three-argument API.
+        """Save a position and its index within its container.
 
-        Passing ``entries`` lets the store record an exact per-container index,
-        which enables a nearest-item fallback if the saved member is deleted.
+        The container index lets restore fall back to the nearest image when
+        the saved member has been deleted.
         """
 
-        context = coerce_folder_context(root)
-        resolved_container_index = self._container_index(
-            context,
-            entry,
-            index,
-            entries,
-            container_index,
-        )
         position = SavedPosition(
             container_id=self._container_id(context, entry.archive_path),
             member_id=_serialize_member_id(entry),
-            container_index=resolved_container_index,
+            container_index=max(container_index, 0),
             global_index=max(index, 0),
         )
 
@@ -129,13 +121,12 @@ class SessionStore:
 
     def restore_index(
         self,
-        root: Path | FolderContext,
+        context: FolderContext,
         entries: list[ImageEntry],
     ) -> int:
         if not entries:
             return 0
 
-        context = coerce_folder_context(root)
         positions = self._read().get("positions")
         if not isinstance(positions, dict):
             return 0
@@ -146,6 +137,22 @@ class SessionStore:
 
         restored = self._find_saved_entry(context, raw_position, entries)
         return restored if restored is not None else 0
+
+    def saved_container(self, context: FolderContext) -> Path | None:
+        """Return the container of the saved position, as the scanner names it."""
+
+        positions = self._read().get("positions")
+        if not isinstance(positions, dict):
+            return None
+        raw_position = positions.get(context.session_key)
+        if not isinstance(raw_position, dict):
+            return None
+        container_id = raw_position.get("container_id")
+        if not isinstance(container_id, str):
+            return None
+        if container_id == ".":
+            return context.access_path
+        return context.access_path / container_id
 
     def _find_saved_entry(
         self,
@@ -176,45 +183,9 @@ class SessionStore:
 
         return matching_container[0]
 
-    def _container_index(
-        self,
-        context: FolderContext,
-        entry: ImageEntry,
-        global_index: int,
-        entries: Sequence[ImageEntry] | None,
-        explicit_index: int | None,
-    ) -> int | None:
-        if isinstance(explicit_index, int) and not isinstance(explicit_index, bool):
-            return max(explicit_index, 0)
-        if entries is None:
-            return max(global_index, 0) if context.source_kind == "archive" else None
-
-        target_container = self._container_id(context, entry.archive_path)
-        if 0 <= global_index < len(entries):
-            indexed_entry = entries[global_index]
-            if (
-                indexed_entry == entry
-                and self._container_id(context, indexed_entry.archive_path)
-                == target_container
-            ):
-                return sum(
-                    self._container_id(context, candidate.archive_path)
-                    == target_container
-                    for candidate in entries[:global_index]
-                )
-
-        container_offset = 0
-        for candidate in entries:
-            if self._container_id(context, candidate.archive_path) != target_container:
-                continue
-            if candidate == entry:
-                return container_offset
-            container_offset += 1
-        return None
-
     def _container_id(self, context: FolderContext, archive_path: Path) -> str:
-        archive_access_path = _resolve_for_identity(archive_path)
-        root_access_path = _resolve_for_identity(context.access_path)
+        archive_access_path = resolve_path(archive_path)
+        root_access_path = resolve_path(context.access_path)
 
         if context.source_kind == "archive" and archive_access_path == root_access_path:
             return "."
@@ -251,7 +222,9 @@ class SessionStore:
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 lock_stream = self.path.with_name(f".{self.path.name}.lock").open("a+b")
-            except OSError:
+            except OSError as exc:
+                # The write below fails the same way and is logged there.
+                _log.debug("Cannot lock session file %s: %s", self.path, exc)
                 yield
                 return
 
@@ -312,35 +285,33 @@ class SessionStore:
         return migrated
 
     def _write(self, data: dict[str, Any]) -> None:
+        # Losing a saved position must not interrupt viewing, so write failures
+        # are logged rather than raised.
+        payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
         try:
-            payload = json.dumps(data, ensure_ascii=False, indent=2)
             self.path.parent.mkdir(parents=True, exist_ok=True)
             descriptor, temporary_name = tempfile.mkstemp(
                 dir=self.path.parent,
                 prefix=f".{self.path.name}.",
                 suffix=".tmp",
             )
-        except OSError:
+        except OSError as exc:
+            _log.warning("Cannot save session to %s: %s", self.path, exc)
             return
 
         temporary_path = Path(temporary_name)
         try:
+            # fdopen owns the descriptor from here on and closes it even when
+            # writing fails, so it must never be closed a second time.
             with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
                 stream.write(payload)
-                stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary_path, self.path)
-        except OSError:
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
+        except OSError as exc:
+            _log.warning("Cannot save session to %s: %s", self.path, exc)
         finally:
-            try:
-                temporary_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+            temporary_path.unlink(missing_ok=True)
 
 
 def _empty_session() -> dict[str, Any]:
@@ -392,13 +363,6 @@ def _unlock_file(stream) -> None:
     import fcntl
 
     fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
-
-
-def _resolve_for_identity(path: Path) -> Path:
-    try:
-        return Path(path).resolve(strict=False)
-    except (OSError, RuntimeError):
-        return Path(path)
 
 
 def _serialize_member_id(entry: ImageEntry) -> SerializedMemberId:

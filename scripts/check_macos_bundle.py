@@ -172,6 +172,14 @@ def check_bundle_metadata(app_dir: Path, expected_version: str, target_macos: st
         errors.append(
             f"LSMinimumSystemVersion is {minimum_system_version!r}; expected {target_macos!r}"
         )
+    handled_types = {
+        content_type
+        for document_type in info.get("CFBundleDocumentTypes", [])
+        for content_type in document_type.get("LSItemContentTypes", [])
+    }
+    for content_type in ("public.zip-archive", "public.folder"):
+        if content_type not in handled_types:
+            errors.append(f"Info.plist does not declare Finder support for {content_type}")
     return errors
 
 

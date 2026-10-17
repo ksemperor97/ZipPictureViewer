@@ -151,8 +151,7 @@ class OverlayController(QObject):
 
     def set_visible(self, visible: bool) -> None:
         self.controls_panel.setVisible(visible)
-        file_label = getattr(self.info_panel, "file_label", None)
-        has_info = file_label is not None and bool(file_label.text())
+        has_info = bool(self.info_panel.file_label.text())
         self.info_panel.setVisible(visible and has_info)
         self.sync_grip(visible)
 

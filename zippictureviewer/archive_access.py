@@ -50,17 +50,14 @@ class ArchiveAccess:
             )
 
         encoded_password = password.encode("utf-8")
-        self._passwords[_archive_key(entry.archive_path)] = encoded_password
+        self._passwords[entry.archive_path] = encoded_password
         return ArchiveAccessDecision(True, encoded_password)
 
     def cached_password(self, entry: ImageEntry) -> bytes | None:
         if entry.encryption != "zipcrypto":
             return None
-        return self._passwords.get(_archive_key(entry.archive_path))
+        return self._passwords.get(entry.archive_path)
 
     def invalidate_password(self, entry: ImageEntry) -> None:
-        self._passwords.pop(_archive_key(entry.archive_path), None)
+        self._passwords.pop(entry.archive_path, None)
 
-
-def _archive_key(path: Path) -> Path:
-    return path.expanduser().absolute()

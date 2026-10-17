@@ -5,9 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from .formats import ARCHIVE_EXTENSIONS
+
 
 SourceKind = Literal["folder", "archive"]
-ARCHIVE_EXTENSIONS = frozenset({".cbz", ".zip"})
 
 
 @dataclass(frozen=True)
@@ -27,17 +28,6 @@ class FolderContext:
         if self.source_kind not in ("folder", "archive"):
             raise ValueError(f"Unsupported source kind: {self.source_kind!r}")
 
-        object.__setattr__(
-            self,
-            "logical_path",
-            _absolute_without_resolving(Path(self.logical_path)),
-        )
-        object.__setattr__(
-            self,
-            "access_path",
-            _resolve_for_access(_absolute_without_resolving(Path(self.access_path))),
-        )
-
     @classmethod
     def from_path(
         cls,
@@ -45,7 +35,7 @@ class FolderContext:
         source_kind: SourceKind | None = None,
     ) -> FolderContext:
         logical_path = _absolute_without_resolving(path)
-        access_path = _resolve_for_access(logical_path)
+        access_path = resolve_path(logical_path)
         return cls(
             logical_path=logical_path,
             access_path=access_path,
@@ -87,18 +77,14 @@ class FolderContext:
         }
 
 
-def coerce_folder_context(value: Path | FolderContext) -> FolderContext:
-    if isinstance(value, FolderContext):
-        return value
-    return FolderContext.from_path(Path(value))
-
-
 def _absolute_without_resolving(path: Path) -> Path:
     expanded = path.expanduser()
     return Path(os.path.abspath(os.fspath(expanded)))
 
 
-def _resolve_for_access(path: Path) -> Path:
+def resolve_path(path: Path) -> Path:
+    """Resolve symlinks, keeping the path as is when that is impossible."""
+
     try:
         return path.resolve(strict=False)
     except (OSError, RuntimeError):

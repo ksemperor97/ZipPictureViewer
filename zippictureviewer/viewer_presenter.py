@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QWidget
 
 from .archive_access import ArchiveAccess, ArchiveAccessDecision
 from .decode_worker import AsyncDecoder, DecodedPayload
-from .image_cache import PixmapCache
+from .image_cache import ImageCache
 from .image_loader import (
     MovieResource,
     SourceChangedError,
@@ -36,7 +36,7 @@ class ImagePresenter(QObject):
         self.state = controller.state
         self.image_view = image_view
         self.dialog_parent = dialog_parent
-        self.cache = PixmapCache()
+        self.cache = ImageCache()
         self.decoder = AsyncDecoder(parent=self)
         self.current_pixmap: QPixmap | None = None
         self.current_movie: MovieResource | None = None
@@ -103,15 +103,16 @@ class ImagePresenter(QObject):
 
     def request_full_resolution(self) -> None:
         entry = self.state.current_entry
-        if (
-            self._closing
-            or entry is None
-            or entry.is_animated
-            or self._full_resolution_current == entry
-        ):
+        if self._closing or entry is None or entry.is_animated:
             return
         self._resize_timer.stop()
         self._zoom_timer.stop()
+        if self._full_resolution_current == entry:
+            # Nothing to decode, but a fit preview still in flight must not
+            # land afterwards and snap the view back to fit.
+            self.controller.invalidate_display()
+            self.decoder.clear_queued()
+            return
         token = self.controller.begin_display()
         if token is None:
             return
@@ -272,8 +273,8 @@ class ImagePresenter(QObject):
                 payload.image,
                 revision=payload.source_revision,
             )
-        except Exception:
-            return
+        except SourceChangedError:
+            return  # a stale preload is simply dropped
 
     def _show_decoded_image(
         self,

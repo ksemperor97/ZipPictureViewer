@@ -5,10 +5,12 @@
 ## 주요 기능
 
 - 폴더 또는 단일 `.zip`/`.cbz` 파일을 열기와 드래그 앤 드롭으로 엽니다.
+- Finder의 `다음으로 열기`, Dock 아이콘으로 드롭, 명령줄 경로(`zip-picture-viewer <폴더 또는 ZIP>`)로도 열 수 있습니다. 경로를 주고 실행하면 지난 세션 대신 그 경로를 엽니다.
 - ZIP/CBZ 하나를 드롭하거나 `ZIP 열기`로 고르면 그 파일이 든 폴더 전체를 열고 고른 파일의 첫 이미지부터 보여 줍니다. 그 파일 안에 저장된 위치가 있으면 그 위치에서 이어 봅니다. 홈 폴더나 드라이브 최상위에 있는 파일은 전체 스캔을 피하려고 그 파일만 엽니다.
 - 선택한 폴더 아래의 ZIP/CBZ와 일반 이미지 폴더를 한 번에 스캔하고 자연 정렬합니다.
 - 이미지 단위와 묶음 단위로 이동하며 마지막 항목에서는 처음으로 순환합니다.
 - GIF 애니메이션을 재생하고, 정지 이미지는 화면 맞춤·100%·확대/축소·드래그 이동을 지원합니다.
+- 큰 폴더는 고른 ZIP(또는 이어 볼 위치가 있는 묶음)을 먼저 읽어 바로 보여 주고, 나머지는 뒤에서 계속 읽습니다. 다 읽으면 보고 있던 이미지는 그대로 두고 전체 목록으로 넓힙니다.
 - 스캔과 이미지 디코드를 UI 밖에서 실행합니다. 새 루트를 열면 이전 스캔은 취소되고 최신 결과만 적용됩니다.
 - 손상 ZIP, 읽기 실패 이미지, 자원 한도 초과 항목은 다른 파일을 막지 않고 `오류` 목록에 누적됩니다. 오류 창은 모든 항목을 표시하며 전체 복사와 현재 원본 재시도를 제공합니다.
 - ZIP의 UTF-8/CP437 이름과 레거시 CP949 한글 이름을 처리합니다. 현재 보고 있는 아카이브의 이름 해석을 메뉴에서 직접 바꿀 수 있습니다.
@@ -100,10 +102,10 @@ python -m pip install -e ".[dev]"
 python -m zippictureviewer
 ```
 
-설치 후에는 다음 명령도 사용할 수 있습니다.
+설치 후에는 다음 명령도 사용할 수 있습니다. 폴더나 ZIP/CBZ 경로를 넘기면 바로 엽니다.
 
 ```bash
-zip-picture-viewer
+zip-picture-viewer ~/Comics/Series/vol01.zip
 ```
 
 일부 Homebrew Python에서 `pyexpat`이 잘못된 시스템 `libexpat`을 읽는다면 실행 전에 다음을 지정하세요.
@@ -114,8 +116,21 @@ export DYLD_LIBRARY_PATH="/opt/homebrew/opt/expat/lib:$DYLD_LIBRARY_PATH"
 
 ## 검증
 
+테스트는 모두 실제 앱 프로세스를 띄워서 확인하는 E2E 테스트입니다. 테스트마다 앱을 새로 실행해 실제 Qt 입력 이벤트(키, 마우스 클릭, 드래그 앤 드롭)를 보내고, 화면에 그려진 픽셀과 앱 상태를 확인한 뒤 종료합니다. 세션은 테스트별 임시 폴더에 저장되므로 실제 사용 세션은 건드리지 않습니다.
+
 ```bash
-QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q
+```
+
+기본 실행에서는 테스트 중 실제 창이 화면에 나타났다 사라집니다. 창 없이 실행하려면 `QT_QPA_PLATFORM=offscreen`을 지정하세요(CI 방식). 빌드한 앱을 같은 시나리오로 검사하려면 실행 파일 경로를 지정합니다.
+
+```bash
+ZPV_E2E_APP="$PWD/dist/ZipPictureViewer.app/Contents/MacOS/ZipPictureViewer" .venv/bin/python -m pytest -q
+```
+
+테스트는 앱 실행 시 숨은 `--automation-handshake` 옵션과 `ZIP_PICTURE_VIEWER_AUTOMATION_KEY` 환경변수를 함께 줄 때만 열리는 로컬(127.0.0.1) 제어 채널을 사용합니다. 일반 실행에서는 이 채널이 열리지 않습니다. 설정 폴더는 `ZIP_PICTURE_VIEWER_CONFIG_DIR`로 바꿀 수 있습니다.
+
+```bash
 .venv/bin/python -m compileall -q zippictureviewer zippictureviewer_launcher.py
 .venv/bin/python -m pip check
 .venv/bin/python -m zippictureviewer --smoke-test
@@ -177,7 +192,7 @@ dist/ZipPictureViewer-v1.1.0-windows-x64.zip.sha256
 - Windows: `%APPDATA%\ZipPictureViewer\session.json`
 - Linux: `${XDG_CONFIG_HOME:-~/.config}/ZipPictureViewer/session.json`
 
-세션 파일은 임시 파일에 먼저 기록한 뒤 원자적으로 교체합니다. 심볼릭 링크로 연 루트는 논리 경로 문맥을 유지하고, 저장된 항목이 사라지면 같은 컨테이너의 가장 가까운 항목부터 복원합니다.
+`ZIP_PICTURE_VIEWER_CONFIG_DIR` 환경변수를 지정하면 그 폴더의 `session.json`을 사용합니다. 세션 파일은 임시 파일에 먼저 기록한 뒤 원자적으로 교체합니다. 심볼릭 링크로 연 루트는 논리 경로 문맥을 유지하고, 저장된 항목이 사라지면 같은 컨테이너의 가장 가까운 항목부터 복원합니다.
 
 ## Workspace Python environment
 

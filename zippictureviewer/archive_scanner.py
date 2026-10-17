@@ -10,8 +10,8 @@ from .archive_metadata import (
     MetadataEncoding,
     ScanOptions,
     read_archive_infos,
-    validate_metadata_encoding,
 )
+from .formats import ARCHIVE_EXTENSIONS, IMAGE_EXTENSIONS
 from .models import (
     ArchiveMemberId,
     ContainerRevision,
@@ -22,56 +22,9 @@ from .models import (
 from .natural_sort import natural_sorted
 
 
-ARCHIVE_EXTENSIONS = {".cbz", ".zip"}
-IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 CancelCheck = Callable[[], bool]
 ProgressCallback = Callable[[Path, int], None]
-
-
-def find_archives(root: Path) -> list[Path]:
-    containers, _, _, _ = _discover_containers(Path(root))
-    return [path for path in containers if _is_archive_path(path)]
-
-
-def find_image_folders(root: Path) -> list[Path]:
-    containers, _, _, _ = _discover_containers(Path(root))
-    return [path for path in containers if not _is_archive_path(path)]
-
-
-def find_image_containers(root: Path) -> list[Path]:
-    containers, _, _, _ = _discover_containers(Path(root))
-    return containers
-
-
-def image_members_in_archive(
-    archive_path: Path,
-    *,
-    metadata_encoding: MetadataEncoding = "auto",
-) -> list[str]:
-    """Return display names for compatibility with the original API.
-
-    Call :func:`scan_image_index` when exact duplicate-member identity or
-    structured error details are required.
-    """
-
-    validate_metadata_encoding(metadata_encoding)
-    try:
-        entries = _scan_archive(Path(archive_path), metadata_encoding)
-    except _ARCHIVE_ERRORS:
-        return []
-    return [entry.member_name for entry in entries]
-
-
-def image_members_in_folder(folder_path: Path) -> list[str]:
-    try:
-        members = [
-            path.name
-            for path in Path(folder_path).iterdir()
-            if path.is_file() and _is_image_member(path.name)
-        ]
-    except OSError:
-        return []
-    return natural_sorted(members)
+PreviewCallback = Callable[[list[ImageEntry]], None]
 
 
 def scan_image_index(
@@ -81,8 +34,14 @@ def scan_image_index(
     generation: int = 0,
     cancel_check: CancelCheck | None = None,
     progress_callback: ProgressCallback | None = None,
+    preview_callback: PreviewCallback | None = None,
 ) -> ScanResult:
-    """Build an image index while isolating failures to each container."""
+    """Build an image index while isolating failures to each container.
+
+    The priority container (``options.priority_container`` when it was
+    discovered, otherwise the first container) is scanned first and handed
+    to ``preview_callback`` so the UI can show it before the rest is read.
+    """
 
     root = Path(root)
     options = options or ScanOptions()
@@ -96,39 +55,40 @@ def scan_image_index(
         generation=generation,
         discovered_files=discovered_files,
     )
-    if cancelled:
+    if cancelled or not containers:
         return result
+
+    priority = (
+        options.priority_container
+        if options.priority_container in containers
+        else containers[0]
+    )
+    try:
+        early = _scan_container(priority, options, options.max_index_entries, cancel_check)
+    except _ScanCancelled:
+        result.cancelled = True
+        return result
+    if preview_callback is not None and isinstance(early, list) and early:
+        preview_callback(early)
 
     for processed_count, container_path in enumerate(containers, start=1):
         if cancel_check is not None and cancel_check():
             result.cancelled = True
             break
-
-        stage = "scan_archive" if _is_archive_path(container_path) else "scan_folder"
-        try:
-            if _is_archive_path(container_path):
-                encoding = options.encoding_for(container_path)
-                entries = _scan_archive(
-                    container_path,
-                    encoding,
-                    max_members=options.max_archive_members,
-                    max_central_directory_bytes=options.max_central_directory_bytes,
-                    max_entries=options.max_index_entries - len(result.entries),
-                    cancel_check=cancel_check,
-                )
-            else:
-                entries = _scan_folder(
-                    container_path,
-                    max_entries=options.max_index_entries - len(result.entries),
-                    cancel_check=cancel_check,
-                )
-        except _ScanCancelled:
-            result.cancelled = True
-            break
-        except _ARCHIVE_ERRORS as exc:
-            result.issues.append(_issue_for(container_path, stage, exc))
+        if container_path == priority:
+            outcome = early
         else:
-            result.entries.extend(entries)
+            reserved = len(early) if isinstance(early, list) else 0
+            budget = options.max_index_entries - len(result.entries) - reserved
+            try:
+                outcome = _scan_container(container_path, options, budget, cancel_check)
+            except _ScanCancelled:
+                result.cancelled = True
+                break
+        if isinstance(outcome, ScanIssue):
+            result.issues.append(outcome)
+        else:
+            result.entries.extend(outcome)
 
         if progress_callback is not None:
             progress_callback(container_path, processed_count)
@@ -137,10 +97,30 @@ def scan_image_index(
     return result
 
 
-def build_image_index(root: Path) -> list[ImageEntry]:
-    """Compatibility wrapper returning only successfully indexed entries."""
+def _scan_container(
+    container_path: Path,
+    options: ScanOptions,
+    max_entries: int,
+    cancel_check: CancelCheck | None,
+) -> list[ImageEntry] | ScanIssue:
+    """Scan one container, turning its failure into an issue for that container."""
 
-    return scan_image_index(root).entries
+    if not _is_archive_path(container_path):
+        try:
+            return _scan_folder(container_path, max_entries=max_entries, cancel_check=cancel_check)
+        except _ARCHIVE_ERRORS as exc:
+            return _issue_for(container_path, "scan_folder", exc)
+    try:
+        return _scan_archive(
+            container_path,
+            options.encoding_for(container_path),
+            max_members=options.max_archive_members,
+            max_central_directory_bytes=options.max_central_directory_bytes,
+            max_entries=max_entries,
+            cancel_check=cancel_check,
+        )
+    except _ARCHIVE_ERRORS as exc:
+        return _issue_for(container_path, "scan_archive", exc)
 
 
 def _discover_containers(

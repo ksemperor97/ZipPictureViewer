@@ -5,7 +5,7 @@ from math import inf
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QSize, Qt
-from PySide6.QtGui import QImage, QImageReader, QMovie, QPixmap
+from PySide6.QtGui import QImage, QImageReader, QMovie
 
 from .models import ContainerRevision, ImageEntry
 
@@ -155,17 +155,6 @@ def load_image(
     return image
 
 
-def load_pixmap(
-    entry: ImageEntry,
-    limits: ImageLoadLimits = DEFAULT_IMAGE_LIMITS,
-    *,
-    password: bytes | None = None,
-) -> QPixmap:
-    """GUI-thread compatibility wrapper around :func:`load_image`."""
-
-    return QPixmap.fromImage(load_image(entry, limits, password=password))
-
-
 def load_movie(
     entry: ImageEntry,
     limits: ImageLoadLimits = DEFAULT_IMAGE_LIMITS,
@@ -184,31 +173,18 @@ def create_movie_resource(
     """Construct and validate QMovie objects on the GUI thread."""
 
     _validate_uncompressed_size(len(image_bytes), member_name, limits)
+    frame_bytes, frame_count = _probe_animation(image_bytes, member_name, limits)
     byte_array, buffer = _read_buffer(image_bytes)
     movie = QMovie(buffer, QByteArray(b"gif"))
-    movie.setCacheMode(QMovie.CacheMode.CacheNone)
-
-    if not movie.isValid() or not movie.jumpToFrame(0):
-        raise ImageLoadError(f"Cannot load animation: {member_name}")
-    first_frame = movie.currentImage()
-    if first_frame.isNull():
-        raise ImageLoadError(f"Cannot load animation: {member_name}")
-    _validate_pixel_count(
-        first_frame.width(),
-        first_frame.height(),
-        member_name,
-        limits,
-    )
-    _validate_decoded_bytes(
-        first_frame.width(),
-        first_frame.height(),
-        member_name,
-        limits,
-    )
-    frame_count = movie.frameCount()
-    estimated_cache_bytes = int(first_frame.sizeInBytes()) * max(frame_count, 1)
+    # The cache mode must be final before QMovie reads anything: switching it
+    # afterwards makes playback fail once the first frame has been shown.
+    estimated_cache_bytes = frame_bytes * max(frame_count, 1)
     if frame_count > 0 and estimated_cache_bytes <= limits.movie_cache_max_bytes:
         movie.setCacheMode(QMovie.CacheMode.CacheAll)
+    else:
+        movie.setCacheMode(QMovie.CacheMode.CacheNone)
+    if not movie.isValid():
+        raise ImageLoadError(f"Cannot load animation: {member_name}")
 
     return MovieResource(movie=movie, byte_array=byte_array, buffer=buffer)
 
@@ -218,9 +194,8 @@ def current_source_revision(entry: ImageEntry) -> ContainerRevision:
 
 
 def _resolve_archive_info(archive: ZipFile, entry: ImageEntry) -> ZipInfo:
+    # The scanner always records a member id for archive entries.
     member_id = entry.member_id
-    if member_id is None:
-        return archive.getinfo(entry.member_name)
 
     infos = archive.infolist()
     if 0 <= member_id.record_index < len(infos):
@@ -326,10 +301,7 @@ def _validate_decoded_image(
 
 
 def _reader_bytes_per_pixel(reader: QImageReader) -> int:
-    image_format_getter = getattr(reader, "imageFormat", None)
-    if image_format_getter is None:
-        return 4
-    image_format = image_format_getter()
+    image_format = reader.imageFormat()
     if image_format == QImage.Format.Format_Invalid:
         return 4
     depth = QImage(1, 1, image_format).depth()
@@ -343,6 +315,26 @@ def _read_bounded(source, max_bytes: int) -> bytes:
             f"Decoded data exceeds the {max_bytes}-byte safety limit"
         )
     return data
+
+
+def _probe_animation(
+    image_bytes: bytes,
+    member_name: str,
+    limits: ImageLoadLimits,
+) -> tuple[int, int]:
+    """Check limits and decode the first frame without touching the QMovie."""
+
+    _, buffer = _read_buffer(image_bytes)
+    reader = QImageReader(buffer, QByteArray(b"gif"))
+    size = reader.size()
+    if not size.isValid():
+        raise ImageLoadError(f"Cannot load animation: {member_name}")
+    _validate_pixel_count(size.width(), size.height(), member_name, limits)
+    _validate_decoded_bytes(size.width(), size.height(), member_name, limits)
+    first_frame = reader.read()
+    if first_frame.isNull():
+        raise ImageLoadError(f"Cannot load animation: {member_name}")
+    return int(first_frame.sizeInBytes()), reader.imageCount()
 
 
 def _read_buffer(image_bytes: bytes) -> tuple[QByteArray, QBuffer]:
