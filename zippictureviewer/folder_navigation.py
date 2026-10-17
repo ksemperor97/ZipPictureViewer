@@ -31,23 +31,6 @@ def child_folders(folder: NavigationSource) -> list[Path]:
     return natural_sorted(children, key=lambda path: path.name)
 
 
-def first_child_folder(folder: NavigationSource) -> Path | None:
-    children = child_folders(folder)
-    return children[0] if children else None
-
-
-def sibling_folder(folder: NavigationSource, step: int) -> Path | None:
-    """Return a sibling directory while retaining the selected path namespace."""
-
-    logical_path = _logical_path(folder)
-    parent = parent_folder(logical_path)
-    if parent is None:
-        return None
-
-    siblings = child_folders(parent)
-    return _stepped_sibling(logical_path, siblings, step)
-
-
 def sibling_context(context: FolderContext, step: int) -> FolderContext | None:
     """Navigate peers appropriate for the selected source kind.
 

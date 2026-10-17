@@ -48,7 +48,7 @@ def run_smoke_test() -> int:
         context = FolderContext.from_path(archive_path)
         store = SessionStore(root / "session.json")
         store.save_root(context)
-        store.save_position(context, result.entries[0], 0, result.entries)
+        store.save_position(context, result.entries[0], 0, container_index=0)
         if store.last_context() != context or store.restore_index(context, result.entries) != 0:
             raise RuntimeError("Session persistence smoke check failed")
 

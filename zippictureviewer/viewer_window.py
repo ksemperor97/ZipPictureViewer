@@ -38,7 +38,6 @@ class MainWindow(QMainWindow):
 
         self.controller = ViewerController()
         self.state = self.controller.state
-        self.current_root: Path | None = None
         self.session_store = SessionStore()
         self.source_loader = SourceLoader(
             self.controller,
@@ -54,11 +53,6 @@ class MainWindow(QMainWindow):
         # before MainWindow can validate and load them.
         self.image_view.setAcceptDrops(False)
         self.presenter = ImagePresenter(self.controller, self.image_view, self)
-        # Compatibility aliases for integrations using the original fields.
-        self.image_cache = self.presenter.cache
-        self.decoder = self.presenter.decoder
-        # Compatibility alias for integrations that used MainWindow.image_label.
-        self.image_label = self.image_view
         self.controls_panel = ViewerControls()
         self.info_panel = ViewerInfoPanel()
         self.issue_dialog = IssueDialog(self)
@@ -159,11 +153,6 @@ class MainWindow(QMainWindow):
             self.load_source(context)
             return
         self.load_source(folder_context, focus_archive=context.logical_path)
-
-    def load_folder(self, root: Path) -> None:
-        """Compatibility alias for callers that load directory roots."""
-
-        self.load_source(root)
 
     def load_source(
         self,
@@ -352,7 +341,6 @@ class MainWindow(QMainWindow):
         context: FolderContext,
         result: ScanResult,
     ) -> None:
-        self.current_root = context.logical_path
         self.presenter.reset_source()
         self._update_issues_button()
 

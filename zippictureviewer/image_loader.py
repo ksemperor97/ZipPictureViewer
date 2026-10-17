@@ -5,7 +5,7 @@ from math import inf
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QSize, Qt
-from PySide6.QtGui import QImage, QImageReader, QMovie, QPixmap
+from PySide6.QtGui import QImage, QImageReader, QMovie
 
 from .models import ContainerRevision, ImageEntry
 
@@ -153,17 +153,6 @@ def load_image(
     # byte_array and buffer stay local through reader.read(); QImage owns the
     # decoded pixels after this point.
     return image
-
-
-def load_pixmap(
-    entry: ImageEntry,
-    limits: ImageLoadLimits = DEFAULT_IMAGE_LIMITS,
-    *,
-    password: bytes | None = None,
-) -> QPixmap:
-    """GUI-thread compatibility wrapper around :func:`load_image`."""
-
-    return QPixmap.fromImage(load_image(entry, limits, password=password))
 
 
 def load_movie(

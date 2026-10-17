@@ -9,9 +9,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
-from typing import Any, Sequence
+from typing import Any
 
-from .folder_context import FolderContext, coerce_folder_context
+from .folder_context import FolderContext
 from .models import ArchiveMemberId, ImageEntry
 
 
@@ -75,16 +75,9 @@ class SessionStore:
             return None
         return context
 
-    def last_root(self) -> Path | None:
-        """Return the last logical path (the version 1 compatible API)."""
-
-        context = self.last_context()
-        return context.logical_path if context is not None else None
-
-    def save_root(self, root: Path | FolderContext) -> None:
+    def save_root(self, context: FolderContext) -> None:
         """Persist a successfully opened root, including an empty root."""
 
-        context = coerce_folder_context(root)
         with self._locked_update():
             data = self._read_for_update()
             data["version"] = SESSION_VERSION
@@ -95,31 +88,22 @@ class SessionStore:
 
     def save_position(
         self,
-        root: Path | FolderContext,
+        context: FolderContext,
         entry: ImageEntry,
         index: int,
-        entries: Sequence[ImageEntry] | None = None,
         *,
-        container_index: int | None = None,
+        container_index: int,
     ) -> None:
-        """Save a position while retaining the original three-argument API.
+        """Save a position and its index within its container.
 
-        Passing ``entries`` lets the store record an exact per-container index,
-        which enables a nearest-item fallback if the saved member is deleted.
+        The container index lets restore fall back to the nearest image when
+        the saved member has been deleted.
         """
 
-        context = coerce_folder_context(root)
-        resolved_container_index = self._container_index(
-            context,
-            entry,
-            index,
-            entries,
-            container_index,
-        )
         position = SavedPosition(
             container_id=self._container_id(context, entry.archive_path),
             member_id=_serialize_member_id(entry),
-            container_index=resolved_container_index,
+            container_index=max(container_index, 0),
             global_index=max(index, 0),
         )
 
@@ -137,13 +121,12 @@ class SessionStore:
 
     def restore_index(
         self,
-        root: Path | FolderContext,
+        context: FolderContext,
         entries: list[ImageEntry],
     ) -> int:
         if not entries:
             return 0
 
-        context = coerce_folder_context(root)
         positions = self._read().get("positions")
         if not isinstance(positions, dict):
             return 0
@@ -183,42 +166,6 @@ class SessionStore:
             return matching_container[nearest_index]
 
         return matching_container[0]
-
-    def _container_index(
-        self,
-        context: FolderContext,
-        entry: ImageEntry,
-        global_index: int,
-        entries: Sequence[ImageEntry] | None,
-        explicit_index: int | None,
-    ) -> int | None:
-        if isinstance(explicit_index, int) and not isinstance(explicit_index, bool):
-            return max(explicit_index, 0)
-        if entries is None:
-            return max(global_index, 0) if context.source_kind == "archive" else None
-
-        target_container = self._container_id(context, entry.archive_path)
-        if 0 <= global_index < len(entries):
-            indexed_entry = entries[global_index]
-            if (
-                indexed_entry == entry
-                and self._container_id(context, indexed_entry.archive_path)
-                == target_container
-            ):
-                return sum(
-                    self._container_id(context, candidate.archive_path)
-                    == target_container
-                    for candidate in entries[:global_index]
-                )
-
-        container_offset = 0
-        for candidate in entries:
-            if self._container_id(context, candidate.archive_path) != target_container:
-                continue
-            if candidate == entry:
-                return container_offset
-            container_offset += 1
-        return None
 
     def _container_id(self, context: FolderContext, archive_path: Path) -> str:
         archive_access_path = _resolve_for_identity(archive_path)

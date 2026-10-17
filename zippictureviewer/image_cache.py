@@ -5,15 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
 
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage
 
-from .image_loader import (
-    DEFAULT_IMAGE_LIMITS,
-    ImageLoadLimits,
-    SourceChangedError,
-    current_source_revision,
-    load_image,
-)
+from .image_loader import SourceChangedError, current_source_revision
 from .models import ContainerRevision, ImageEntry
 
 
@@ -28,22 +22,13 @@ class _CacheItem:
     source_key: Path
 
 
-class PixmapCache:
-    """Thread-safe byte-budgeted QImage cache with a QPixmap compatibility API."""
+class ImageCache:
+    """Thread-safe, byte-budgeted cache of decoded images keyed by entry."""
 
-    def __init__(
-        self,
-        max_items: int | None = None,
-        max_bytes: int = DEFAULT_CACHE_BYTES,
-        limits: ImageLoadLimits = DEFAULT_IMAGE_LIMITS,
-    ) -> None:
-        if max_items is not None and max_items < 1:
-            raise ValueError("max_items must be positive or None")
+    def __init__(self, max_bytes: int = DEFAULT_CACHE_BYTES) -> None:
         if max_bytes < 0:
             raise ValueError("max_bytes cannot be negative")
-        self.max_items = max_items
         self.max_bytes = max_bytes
-        self.limits = limits
         self._items: OrderedDict[ImageEntry, _CacheItem] = OrderedDict()
         self._total_bytes = 0
         self._lock = RLock()
@@ -88,23 +73,6 @@ class PixmapCache:
             self._items.move_to_end(entry)
             return QImage(cached.image)
 
-    def get_or_load_image(self, entry: ImageEntry) -> QImage:
-        before_revision = current_source_revision(entry)
-        source_key = _source_key(entry)
-        with self._lock:
-            self._invalidate_stale_source(source_key, before_revision)
-            cached = self._items.get(entry)
-            if cached is not None and cached.revision == before_revision:
-                self._items.move_to_end(entry)
-                return QImage(cached.image)
-
-        image = load_image(entry, self.limits)
-        after_revision = current_source_revision(entry)
-        if after_revision != before_revision:
-            raise SourceChangedError(f"Source changed while loading: {entry.source_path}")
-        self.put_image(entry, image, revision=after_revision)
-        return image
-
     def put_image(
         self,
         entry: ImageEntry,
@@ -142,32 +110,6 @@ class PixmapCache:
             self._trim()
             return True
 
-    def get_or_load(self, entry: ImageEntry) -> QPixmap:
-        """Return a GUI-thread QPixmap for compatibility with existing UI code."""
-
-        return QPixmap.fromImage(self.get_or_load_image(entry))
-
-    def preload_around(
-        self,
-        entries: list[ImageEntry],
-        current_index: int,
-        before: int = 2,
-        after: int = 3,
-    ) -> None:
-        if not entries:
-            return
-
-        start = max(0, current_index - before)
-        stop = min(len(entries), current_index + after + 1)
-        for index in range(start, stop):
-            entry = entries[index]
-            if entry.is_animated:
-                continue
-            try:
-                self.get_or_load_image(entry)
-            except Exception:
-                continue
-
     def _invalidate_stale_source(
         self,
         source_key: Path,
@@ -183,9 +125,7 @@ class PixmapCache:
             self._total_bytes -= item.size_bytes
 
     def _trim(self) -> None:
-        while self._total_bytes > self.max_bytes or (
-            self.max_items is not None and len(self._items) > self.max_items
-        ):
+        while self._total_bytes > self.max_bytes:
             _, item = self._items.popitem(last=False)
             self._total_bytes -= item.size_bytes
 

@@ -87,12 +87,6 @@ class FolderContext:
         }
 
 
-def coerce_folder_context(value: Path | FolderContext) -> FolderContext:
-    if isinstance(value, FolderContext):
-        return value
-    return FolderContext.from_path(Path(value))
-
-
 def _absolute_without_resolving(path: Path) -> Path:
     expanded = path.expanduser()
     return Path(os.path.abspath(os.fspath(expanded)))

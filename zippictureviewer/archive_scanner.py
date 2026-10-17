@@ -10,7 +10,6 @@ from .archive_metadata import (
     MetadataEncoding,
     ScanOptions,
     read_archive_infos,
-    validate_metadata_encoding,
 )
 from .models import (
     ArchiveMemberId,
@@ -26,52 +25,6 @@ ARCHIVE_EXTENSIONS = {".cbz", ".zip"}
 IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 CancelCheck = Callable[[], bool]
 ProgressCallback = Callable[[Path, int], None]
-
-
-def find_archives(root: Path) -> list[Path]:
-    containers, _, _, _ = _discover_containers(Path(root))
-    return [path for path in containers if _is_archive_path(path)]
-
-
-def find_image_folders(root: Path) -> list[Path]:
-    containers, _, _, _ = _discover_containers(Path(root))
-    return [path for path in containers if not _is_archive_path(path)]
-
-
-def find_image_containers(root: Path) -> list[Path]:
-    containers, _, _, _ = _discover_containers(Path(root))
-    return containers
-
-
-def image_members_in_archive(
-    archive_path: Path,
-    *,
-    metadata_encoding: MetadataEncoding = "auto",
-) -> list[str]:
-    """Return display names for compatibility with the original API.
-
-    Call :func:`scan_image_index` when exact duplicate-member identity or
-    structured error details are required.
-    """
-
-    validate_metadata_encoding(metadata_encoding)
-    try:
-        entries = _scan_archive(Path(archive_path), metadata_encoding)
-    except _ARCHIVE_ERRORS:
-        return []
-    return [entry.member_name for entry in entries]
-
-
-def image_members_in_folder(folder_path: Path) -> list[str]:
-    try:
-        members = [
-            path.name
-            for path in Path(folder_path).iterdir()
-            if path.is_file() and _is_image_member(path.name)
-        ]
-    except OSError:
-        return []
-    return natural_sorted(members)
 
 
 def scan_image_index(
@@ -135,12 +88,6 @@ def scan_image_index(
         result.containers_scanned = processed_count
 
     return result
-
-
-def build_image_index(root: Path) -> list[ImageEntry]:
-    """Compatibility wrapper returning only successfully indexed entries."""
-
-    return scan_image_index(root).entries
 
 
 def _discover_containers(

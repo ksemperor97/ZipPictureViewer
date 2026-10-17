@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QWidget
 
 from .archive_access import ArchiveAccess, ArchiveAccessDecision
 from .decode_worker import AsyncDecoder, DecodedPayload
-from .image_cache import PixmapCache
+from .image_cache import ImageCache
 from .image_loader import (
     MovieResource,
     SourceChangedError,
@@ -36,7 +36,7 @@ class ImagePresenter(QObject):
         self.state = controller.state
         self.image_view = image_view
         self.dialog_parent = dialog_parent
-        self.cache = PixmapCache()
+        self.cache = ImageCache()
         self.decoder = AsyncDecoder(parent=self)
         self.current_pixmap: QPixmap | None = None
         self.current_movie: MovieResource | None = None
