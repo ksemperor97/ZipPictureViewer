@@ -1,0 +1,59 @@
+"""Large folders show the relevant images before the whole scan finishes."""
+
+from __future__ import annotations
+
+from media import BLUE, RED, write_book
+
+VOLUMES = 2000
+
+
+def _big_library(root):
+    library = root / "big"
+    for index in range(VOLUMES):
+        write_book(library / f"vol{index:04}.zip", [BLUE if index == 1500 else RED, RED])
+    return library
+
+
+def _shown_while_scanning(state, archive, member) -> bool:
+    return (
+        state["archive"] == archive
+        and state["member"] == member
+        and state["has_image"]
+        and state["scanning"]
+    )
+
+
+def test_dropped_archive_appears_before_the_scan_finishes(launch_app, tmp_path) -> None:
+    library = _big_library(tmp_path)
+    app = launch_app()
+
+    app.drop(library / "vol1500.zip")
+    app.wait_for(
+        lambda s: _shown_while_scanning(s, "vol1500.zip", "p1.png"),
+        "chosen archive shown while scanning",
+    )
+    state = app.wait_for_idle()
+    assert state["entry_count"] == VOLUMES * 2
+    assert state["archive"] == "vol1500.zip" and state["member"] == "p1.png"
+    assert state["status"] == f"{1500 * 2 + 1} / {VOLUMES * 2}"
+
+    app.key("Down")
+    app.wait_for_image("vol1501.zip", "p1.png")
+
+
+def test_relaunch_shows_the_saved_page_while_scanning(launch_app, tmp_path) -> None:
+    library = _big_library(tmp_path)
+    app = launch_app()
+    app.drop(library / "vol1500.zip")
+    app.wait_for_idle()
+    app.key("Right")
+    app.wait_for_image("vol1500.zip", "p2.png")
+    assert app.close() == 0
+
+    relaunched = launch_app()
+    relaunched.wait_for(
+        lambda s: _shown_while_scanning(s, "vol1500.zip", "p2.png"),
+        "saved page shown while scanning",
+    )
+    state = relaunched.wait_for_idle()
+    assert state["member"] == "p2.png" and state["archive"] == "vol1500.zip"
