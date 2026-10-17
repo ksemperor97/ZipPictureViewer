@@ -52,7 +52,8 @@ public enum ZipArchive {
             throw ZipError(.resourceLimit, "Archive has \(directory.count) members; limit is \(limits.maxMembers).")
         }
         guard directory.size <= UInt64(limits.maxCentralDirectoryBytes),
-              directory.offset + directory.size <= fileSize
+              let directoryEnd = checkedSum(directory.offset, directory.size),
+              directoryEnd <= fileSize
         else {
             throw ZipError(.resourceLimit, "Central directory is too large or out of bounds.")
         }
@@ -96,10 +97,14 @@ public enum ZipArchive {
         guard locator.u32() == 0x0706_4B50 else { throw ZipError(.badZip, "Missing ZIP64 locator") }
         locator.skip(4)
         let recordOffset = locator.u64()
-        guard recordOffset + 56 <= fileSize else { throw ZipError(.badZip, "Bad ZIP64 record") }
+        guard let recordEnd = checkedSum(recordOffset, 56), recordEnd <= fileSize else {
+            throw ZipError(.badZip, "Bad ZIP64 record offset")
+        }
         try handle.seek(toOffset: recordOffset)
         let record = ByteReader(try handle.read(upToCount: 56) ?? Data())
-        guard record.u32() == 0x0606_4B50 else { throw ZipError(.badZip, "Bad ZIP64 record") }
+        guard record.remaining == 56, record.u32() == 0x0606_4B50 else {
+            throw ZipError(.badZip, "Bad ZIP64 record")
+        }
         record.skip(28)
         let count = record.u64()
         let size = record.u64()
@@ -163,6 +168,18 @@ public enum ZipArchive {
         }
         return nil
     }
+}
+
+/// Sum of offsets and sizes read from a file, or nil if it would overflow.
+/// Declared values are untrusted, so plain `+` could trap the process.
+func checkedSum(_ values: UInt64...) -> UInt64? {
+    var total: UInt64 = 0
+    for value in values {
+        let (sum, overflow) = total.addingReportingOverflow(value)
+        if overflow { return nil }
+        total = sum
+    }
+    return total
 }
 
 /// ZIP extra field blocks (id, size, payload).

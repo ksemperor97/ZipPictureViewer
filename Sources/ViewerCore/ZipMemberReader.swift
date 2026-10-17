@@ -50,6 +50,10 @@ public enum ZipMemberReader {
         }
         let handle = try FileHandle(forReadingFrom: entry.container)
         defer { try? handle.close() }
+        let fileSize = try handle.seekToEnd()
+        guard let headerEnd = checkedSum(location.localHeaderOffset, 30), headerEnd <= fileSize else {
+            throw ZipError(.badZip, "Local header of \(entry.memberName) is outside the archive")
+        }
         try handle.seek(toOffset: location.localHeaderOffset)
         let header = ByteReader(try handle.read(upToCount: 30) ?? Data())
         guard header.remaining == 30, header.u32() == 0x0403_4B50 else {
@@ -57,7 +61,15 @@ public enum ZipMemberReader {
         }
         header.skip(22)
         let skip = UInt64(header.u16()) + UInt64(header.u16())
-        try handle.seek(toOffset: location.localHeaderOffset + 30 + skip)
+        // The declared size must fit inside the file; after this check it
+        // also fits in `Int`.
+        guard let dataStart = checkedSum(headerEnd, skip),
+              let dataEnd = checkedSum(dataStart, location.compressedSize),
+              dataEnd <= fileSize
+        else {
+            throw ZipError(.badZip, "Data of \(entry.memberName) is outside the archive")
+        }
+        try handle.seek(toOffset: dataStart)
         var payload = try handle.read(upToCount: Int(location.compressedSize)) ?? Data()
         guard payload.count == Int(location.compressedSize) else {
             throw ZipError(.badZip, "Truncated data for \(entry.memberName)")
@@ -77,8 +89,12 @@ public enum ZipMemberReader {
         if location.uncompressedSize > limits.maxUncompressedBytes {
             throw ZipError(.resourceLimit, "Image expands to \(location.uncompressedSize) bytes; limit is \(limits.maxUncompressedBytes).")
         }
-        if location.uncompressedSize > limits.ratioCheckThreshold,
-           location.uncompressedSize > max(location.compressedSize, 1) * limits.maxCompressionRatio {
+        // An overflowing product means the compressed size is already huge,
+        // so the ratio cannot be exceeded.
+        let (allowed, overflow) = max(location.compressedSize, 1)
+            .multipliedReportingOverflow(by: limits.maxCompressionRatio)
+        if location.uncompressedSize > limits.ratioCheckThreshold, !overflow,
+           location.uncompressedSize > allowed {
             throw ZipError(.resourceLimit, "Compression ratio exceeds \(limits.maxCompressionRatio)x.")
         }
     }
