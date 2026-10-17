@@ -7,7 +7,7 @@ on:
         description: "Existing release tag in vX.Y.Z form; must match VERSION"
         required: true
       upload_to_release:
-        description: "Upload the zip and checksum to the GitHub release (creates a draft if none exists)"
+        description: "Upload the zip to the GitHub release (creates a draft if none exists)"
         required: true
         type: boolean
         default: true
@@ -146,9 +146,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ZipPictureViewer-v${{ steps.version.outputs.version }}-mac
-          path: |
-            dist/ZipPictureViewer-v${{ steps.version.outputs.version }}-mac.zip
-            dist/ZipPictureViewer-v${{ steps.version.outputs.version }}-mac.zip.sha256
+          path: dist/ZipPictureViewer-v${{ steps.version.outputs.version }}-mac.zip
           if-no-files-found: error
 
       - name: Upload to the GitHub release
@@ -161,7 +159,7 @@ jobs:
             gh release create "$RELEASE_TAG" --verify-tag --draft --generate-notes \
               --title "ZipPictureViewer $RELEASE_TAG"
           fi
-          gh release upload "$RELEASE_TAG" "$ARCHIVE" "$ARCHIVE.sha256" --clobber
+          gh release upload "$RELEASE_TAG" "$ARCHIVE" --clobber
 
       - name: Delete the temporary keychain
         if: ${{ always() }}

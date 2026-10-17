@@ -65,7 +65,7 @@ swift run ZipPictureViewer ~/Comics/Series/vol01.zip
 Scripts/build_app.sh
 ```
 
-결과물은 `dist/ZipPictureViewer.app`과 `dist/ZipPictureViewer-v<버전>-mac.zip`(+ `.sha256`)입니다. Apple Silicon과 Intel을 함께 담은 유니버설 앱이며(`lipo`로 두 아키텍처와 최소 macOS 13.0을 확인), 여러 아키텍처 빌드에는 Xcode가 필요합니다. Command Line Tools만 있으면 `ARCHS=arm64`처럼 한 아키텍처만 지정합니다. 기본은 hardened runtime을 켠 ad-hoc 서명이며, `CODESIGN_IDENTITY`로 서명 인증서를 지정할 수 있습니다. 앱 안에서 디코더, ZIP 스캔, 세션 저장을 점검하려면 `--smoke-test`로 실행합니다.
+결과물은 `dist/ZipPictureViewer.app`과 `dist/ZipPictureViewer-v<버전>-mac.zip`입니다. Apple Silicon과 Intel을 함께 담은 유니버설 앱이며(`lipo`로 두 아키텍처와 최소 macOS 13.0을 확인), 여러 아키텍처 빌드에는 Xcode가 필요합니다. Command Line Tools만 있으면 `ARCHS=arm64`처럼 한 아키텍처만 지정합니다. 기본은 hardened runtime을 켠 ad-hoc 서명이며, `CODESIGN_IDENTITY`로 서명 인증서를 지정할 수 있습니다. 앱 안에서 디코더, ZIP 스캔, 세션 저장을 점검하려면 `--smoke-test`로 실행합니다.
 
 Xcode에서 개발하려면 `Package.swift`를 열면 됩니다.
 
@@ -84,7 +84,7 @@ Xcode에서 개발하려면 `Package.swift`를 열면 됩니다.
 
 3. Actions의 `Release` 워크플로를 `tag`에 `v2.0.0`을 넣어 실행합니다. 태그와 `VERSION`이 다르면 멈춥니다.
 
-워크플로는 인증서를 임시 키체인에 넣고, 유니버설 앱을 빌드·서명한 뒤 `--smoke-test`(Rosetta로 Intel 쪽도)와 E2E 테스트를 앱 번들에 돌립니다. 통과하면 공증을 받아 티켓을 붙이고(`stapler`), `spctl`로 Gatekeeper 통과를 확인한 다음 zip과 `.sha256`을 그 태그의 GitHub 릴리스에 올립니다. 릴리스가 없으면 초안(draft)으로 만들므로, 내용을 확인한 뒤 직접 공개합니다. `upload_to_release`를 끄면 워크플로 아티팩트로만 남깁니다.
+워크플로는 인증서를 임시 키체인에 넣고, 유니버설 앱을 빌드·서명한 뒤 `--smoke-test`(Rosetta로 Intel 쪽도)와 E2E 테스트를 앱 번들에 돌립니다. 통과하면 공증을 받아 티켓을 붙이고(`stapler`), `spctl`로 Gatekeeper 통과를 확인한 다음 zip을 그 태그의 GitHub 릴리스에 올립니다. 릴리스가 없으면 초안(draft)으로 만들므로, 내용을 확인한 뒤 직접 공개합니다. `upload_to_release`를 끄면 워크플로 아티팩트로만 남깁니다.
 
 필요한 저장소 시크릿:
 
