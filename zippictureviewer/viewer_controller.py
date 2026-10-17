@@ -38,13 +38,34 @@ class ViewerController:
         self.pending_context = context
         return self._load_generation
 
+    def apply_preview(
+        self,
+        generation: int,
+        entries: Sequence[ImageEntry],
+        current_index: int,
+    ) -> bool:
+        """Show the first scanned container while the load stays pending."""
+
+        if generation != self._load_generation or self.pending_context is None:
+            return False
+        self.current_context = self.pending_context
+        self.scan_issues = []
+        self.state.set_entries(list(entries), current_index)
+        self._display_generation += 1
+        return True
+
     def apply_load(
         self,
         generation: int,
         entries: Sequence[ImageEntry],
         issues: Sequence[object] = (),
         current_index: int = 0,
+        *,
+        keep_display: bool = False,
     ) -> bool:
+        """Finish a load. ``keep_display`` keeps in-flight work for the shown
+        entry valid when a preview is extended to the full list."""
+
         if generation != self._load_generation or self.pending_context is None:
             return False
 
@@ -52,7 +73,8 @@ class ViewerController:
         self.pending_context = None
         self.scan_issues = list(issues)
         self.state.set_entries(list(entries), current_index)
-        self._display_generation += 1
+        if not keep_display:
+            self._display_generation += 1
         return True
 
     def reject_load(self, generation: int) -> bool:

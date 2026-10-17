@@ -18,7 +18,11 @@ class SourceLoader(QObject):
     status_changed = Signal(str)
     scanning_changed = Signal(bool)
     before_apply = Signal()
+    # (context, result): a source is shown, from a preview or a full scan.
     source_applied = Signal(object, object)
+    # (context, result): a previewed source received its complete list while
+    # the shown image stayed the same.
+    source_completed = Signal(object, object)
     source_rejected = Signal(str)
 
     def __init__(
@@ -34,8 +38,10 @@ class SourceLoader(QObject):
         self._source_encodings: dict[str, MetadataEncoding] = {}
         self._encoding_overrides: dict[Path, MetadataEncoding] = {}
         self._focus_archive: Path | None = None
+        self._previewed_generation: int | None = None
         self._shutting_down = False
         self.scanner.progress.connect(self._scan_progress)
+        self.scanner.preview.connect(self._scan_preview)
         self.scanner.finished.connect(self._scan_finished)
         self.scanner.failed.connect(self._scan_failed)
 
@@ -57,6 +63,7 @@ class SourceLoader(QObject):
             else FolderContext.from_path(source)
         )
         generation = self.controller.begin_load(context)
+        self._previewed_generation = None
         self._focus_archive = (
             _focus_access_path(context, focus_archive)
             if focus_archive is not None
@@ -72,6 +79,9 @@ class SourceLoader(QObject):
         options = ScanOptions(
             metadata_encoding=self.root_encoding(context),
             encoding_overrides=self._encoding_overrides,
+            # Preview the chosen archive, or where the reader left off.
+            priority_container=self._focus_archive
+            or self.session_store.saved_container(context),
         )
         self.scanning_changed.emit(True)
         self.status_changed.emit("스캔 중…")
@@ -121,6 +131,22 @@ class SourceLoader(QObject):
             return
         self.status_changed.emit(f"스캔 중… {count}  {Path(path).name}")
 
+    def _scan_preview(self, generation: int, entries: list[ImageEntry]) -> None:
+        context = self.controller.pending_context
+        if (
+            self._shutting_down
+            or context is None
+            or generation != self.controller.load_generation
+        ):
+            return
+        index = self._initial_index(context, entries)
+        if self.controller.apply_preview(generation, entries, index):
+            self._previewed_generation = generation
+            self.source_applied.emit(
+                context,
+                ScanResult(entries=list(entries), generation=generation),
+            )
+
     def _scan_finished(self, generation: int, result: ScanResult) -> None:
         if self._shutting_down:
             self.controller.reject_load(generation)
@@ -142,16 +168,30 @@ class SourceLoader(QObject):
             return
 
         self.before_apply.emit()
-        initial_index = self._initial_index(context, result.entries)
+        shown = (
+            self.controller.state.current_entry
+            if self._previewed_generation == generation
+            else None
+        )
+        self._previewed_generation = None
+        keep_display = shown is not None and shown in result.entries
+        if keep_display:
+            index = result.entries.index(shown)
+        else:
+            index = self._initial_index(context, result.entries)
         if not self.controller.apply_load(
             generation,
             result.entries,
             result.issues,
-            initial_index,
+            index,
+            keep_display=keep_display,
         ):
             return
         self.session_store.save_root(context)
-        self.source_applied.emit(context, result)
+        if keep_display:
+            self.source_completed.emit(context, result)
+        else:
+            self.source_applied.emit(context, result)
 
     def _scan_failed(self, generation: int, message: str) -> None:
         if self._shutting_down:

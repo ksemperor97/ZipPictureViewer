@@ -138,6 +138,22 @@ class SessionStore:
         restored = self._find_saved_entry(context, raw_position, entries)
         return restored if restored is not None else 0
 
+    def saved_container(self, context: FolderContext) -> Path | None:
+        """Return the container of the saved position, as the scanner names it."""
+
+        positions = self._read().get("positions")
+        if not isinstance(positions, dict):
+            return None
+        raw_position = positions.get(context.session_key)
+        if not isinstance(raw_position, dict):
+            return None
+        container_id = raw_position.get("container_id")
+        if not isinstance(container_id, str):
+            return None
+        if container_id == ".":
+            return context.access_path
+        return context.access_path / container_id
+
     def _find_saved_entry(
         self,
         context: FolderContext,

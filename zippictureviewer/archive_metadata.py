@@ -34,6 +34,8 @@ class ScanOptions:
     max_archive_members: int = DEFAULT_MAX_ARCHIVE_MEMBERS
     max_central_directory_bytes: int = DEFAULT_MAX_CENTRAL_DIRECTORY_BYTES
     max_index_entries: int = DEFAULT_MAX_ARCHIVE_MEMBERS
+    # Container to scan and preview first (absolute, as discovered).
+    priority_container: Path | None = None
 
     def __post_init__(self) -> None:
         validate_metadata_encoding(self.metadata_encoding)

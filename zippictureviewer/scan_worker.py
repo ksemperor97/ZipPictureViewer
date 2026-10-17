@@ -13,6 +13,7 @@ from .models import ScanResult
 
 class ScanWorker(QObject):
     progress = Signal(int, str, int)
+    preview = Signal(int, object)
     finished = Signal(int, object)
     failed = Signal(int, str)
 
@@ -40,6 +41,7 @@ class ScanWorker(QObject):
                 generation=self.generation,
                 cancel_check=self._cancelled.is_set,
                 progress_callback=self._report_progress,
+                preview_callback=self._report_preview,
             )
         except Exception as error:
             self.failed.emit(self.generation, str(error))
@@ -48,6 +50,9 @@ class ScanWorker(QObject):
 
     def _report_progress(self, path: Path, count: int) -> None:
         self.progress.emit(self.generation, str(path), count)
+
+    def _report_preview(self, entries: list) -> None:
+        self.preview.emit(self.generation, entries)
 
 
 @dataclass(frozen=True)
@@ -67,6 +72,7 @@ class ScanCoordinator(QObject):
     """Own scan threads and retire them only after their event loop exits."""
 
     progress = Signal(int, str, int)
+    preview = Signal(int, object)
     finished = Signal(int, object)
     failed = Signal(int, str)
     idle = Signal()
@@ -107,6 +113,7 @@ class ScanCoordinator(QObject):
 
         thread.started.connect(worker.run)
         worker.progress.connect(self.progress)
+        worker.preview.connect(self.preview)
         worker.finished.connect(self.finished)
         worker.failed.connect(self.failed)
         worker.finished.connect(worker.deleteLater)

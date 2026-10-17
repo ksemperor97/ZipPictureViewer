@@ -253,6 +253,7 @@ class MainWindow(QMainWindow):
         self.source_loader.scanning_changed.connect(self.controls_panel.set_scanning)
         self.source_loader.before_apply.connect(self.position_saver.flush)
         self.source_loader.source_applied.connect(self._source_applied)
+        self.source_loader.source_completed.connect(self._source_completed)
         self.source_loader.source_rejected.connect(self._source_rejected)
 
     def _source_applied(self, context: FolderContext, result: ScanResult) -> None:
@@ -262,6 +263,12 @@ class MainWindow(QMainWindow):
             self.presenter.show_current()
         else:
             self.status.show_empty_source(context, result)
+
+    def _source_completed(self, _context: FolderContext, _result: ScanResult) -> None:
+        # The previewed image stays on screen; only the surrounding state grows.
+        self.status.update_issues()
+        self.status.update_navigation()
+        self.status.set_status(self.state.position_label)
 
     def _source_rejected(self, message: str) -> None:
         self._show_transient_status(message)
