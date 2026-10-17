@@ -61,8 +61,8 @@ def containing_folder_context(archive: FolderContext) -> FolderContext | None:
     a recursive scan there is slow and can trigger OS privacy prompts.
     """
 
-    if archive.source_kind != "archive":
-        return None
+    if archive.source_kind != "archive" or not archive.is_accessible:
+        return None  # a missing archive is reported, not swapped for its folder
     parent = parent_folder(archive)
     if parent is None or _is_broad_scan_root(parent):
         return None
