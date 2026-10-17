@@ -114,8 +114,21 @@ export DYLD_LIBRARY_PATH="/opt/homebrew/opt/expat/lib:$DYLD_LIBRARY_PATH"
 
 ## 검증
 
+테스트는 모두 실제 앱 프로세스를 띄워서 확인하는 E2E 테스트입니다. 테스트마다 앱을 새로 실행해 실제 Qt 입력 이벤트(키, 마우스 클릭, 드래그 앤 드롭)를 보내고, 화면에 그려진 픽셀과 앱 상태를 확인한 뒤 종료합니다. 세션은 테스트별 임시 폴더에 저장되므로 실제 사용 세션은 건드리지 않습니다.
+
 ```bash
-QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q
+```
+
+기본 실행에서는 테스트 중 실제 창이 화면에 나타났다 사라집니다. 창 없이 실행하려면 `QT_QPA_PLATFORM=offscreen`을 지정하세요(CI 방식). 빌드한 앱을 같은 시나리오로 검사하려면 실행 파일 경로를 지정합니다.
+
+```bash
+ZPV_E2E_APP="$PWD/dist/ZipPictureViewer.app/Contents/MacOS/ZipPictureViewer" .venv/bin/python -m pytest -q
+```
+
+테스트는 앱 실행 시 숨은 `--automation-handshake` 옵션과 `ZIP_PICTURE_VIEWER_AUTOMATION_KEY` 환경변수를 함께 줄 때만 열리는 로컬(127.0.0.1) 제어 채널을 사용합니다. 일반 실행에서는 이 채널이 열리지 않습니다. 설정 폴더는 `ZIP_PICTURE_VIEWER_CONFIG_DIR`로 바꿀 수 있습니다.
+
+```bash
 .venv/bin/python -m compileall -q zippictureviewer zippictureviewer_launcher.py
 .venv/bin/python -m pip check
 .venv/bin/python -m zippictureviewer --smoke-test
@@ -177,7 +190,7 @@ dist/ZipPictureViewer-v1.1.0-windows-x64.zip.sha256
 - Windows: `%APPDATA%\ZipPictureViewer\session.json`
 - Linux: `${XDG_CONFIG_HOME:-~/.config}/ZipPictureViewer/session.json`
 
-세션 파일은 임시 파일에 먼저 기록한 뒤 원자적으로 교체합니다. 심볼릭 링크로 연 루트는 논리 경로 문맥을 유지하고, 저장된 항목이 사라지면 같은 컨테이너의 가장 가까운 항목부터 복원합니다.
+`ZIP_PICTURE_VIEWER_CONFIG_DIR` 환경변수를 지정하면 그 폴더의 `session.json`을 사용합니다. 세션 파일은 임시 파일에 먼저 기록한 뒤 원자적으로 교체합니다. 심볼릭 링크로 연 루트는 논리 경로 문맥을 유지하고, 저장된 항목이 사라지면 같은 컨테이너의 가장 가까운 항목부터 복원합니다.
 
 ## Workspace Python environment
 

@@ -48,7 +48,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -c constraints/packaging.txt -e ".[dev]"
 
-      - name: Run tests
+      - name: Run end-to-end tests from source
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest

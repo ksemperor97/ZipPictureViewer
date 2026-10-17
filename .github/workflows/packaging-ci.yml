@@ -36,7 +36,7 @@ jobs:
         id: metadata
         run: echo "version=$(python scripts/check_release_version.py)" >> "$GITHUB_OUTPUT"
 
-      - name: Run tests
+      - name: Run end-to-end tests from source
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest
@@ -46,6 +46,11 @@ jobs:
 
       - name: Build and validate macOS app
         run: scripts/build_macos_app.sh
+
+      - name: Run end-to-end tests against the packaged app
+        env:
+          ZPV_E2E_APP: ${{ github.workspace }}/dist/ZipPictureViewer.app/Contents/MacOS/ZipPictureViewer
+        run: python -m pytest -q
 
       - name: Locate macOS package
         id: package
@@ -100,7 +105,7 @@ jobs:
           $Version = ([string]$VersionOutput).Trim()
           "version=$Version" >> $env:GITHUB_OUTPUT
 
-      - name: Run tests
+      - name: Run end-to-end tests from source
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest
@@ -111,6 +116,11 @@ jobs:
       - name: Build and validate Windows app
         shell: pwsh
         run: scripts/build_windows_app.ps1
+
+      - name: Run end-to-end tests against the packaged app
+        env:
+          ZPV_E2E_APP: ${{ github.workspace }}\dist\ZipPictureViewer\ZipPictureViewer.exe
+        run: python -m pytest -q
 
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
