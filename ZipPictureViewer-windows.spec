@@ -1,11 +1,71 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import sys
+from pathlib import Path
+
+from PyInstaller.utils.hooks import copy_metadata
+from PyInstaller.utils.win32.versioninfo import (
+    FixedFileInfo,
+    StringFileInfo,
+    StringStruct,
+    StringTable,
+    VSVersionInfo,
+    VarFileInfo,
+    VarStruct,
+)
+from scripts.check_release_version import read_project_version, windows_version_tuple
+
+
+PROJECT_ROOT = Path(SPECPATH).resolve()
+APP_VERSION = read_project_version(PROJECT_ROOT)
+WINDOWS_VERSION = windows_version_tuple(APP_VERSION)
+
+# Editable installs expose a source-tree egg-info before their installed dist-info.
+# Bundle the installed metadata so importlib.metadata observes wheel-style metadata.
+ORIGINAL_SYS_PATH = sys.path.copy()
+try:
+    sys.path[:] = [
+        entry
+        for entry in sys.path
+        if entry and Path(entry).resolve() != PROJECT_ROOT
+    ]
+    DISTRIBUTION_METADATA = copy_metadata('zip-picture-viewer')
+finally:
+    sys.path[:] = ORIGINAL_SYS_PATH
+
+RELEASE_METADATA_DIR = PROJECT_ROOT / 'build' / 'release-metadata'
+RELEASE_METADATA_DATAS = [
+    (str(RELEASE_METADATA_DIR / 'build-provenance.json'), 'release'),
+    (str(RELEASE_METADATA_DIR / 'dependency-manifest.txt'), 'release'),
+]
+VERSION_INFO = VSVersionInfo(
+    ffi=FixedFileInfo(filevers=WINDOWS_VERSION, prodvers=WINDOWS_VERSION),
+    kids=[
+        StringFileInfo(
+            [
+                StringTable(
+                    '040904B0',
+                    [
+                        StringStruct('CompanyName', 'ksemperor97'),
+                        StringStruct('FileDescription', 'Zip Picture Viewer'),
+                        StringStruct('FileVersion', APP_VERSION),
+                        StringStruct('InternalName', 'ZipPictureViewer'),
+                        StringStruct('OriginalFilename', 'ZipPictureViewer.exe'),
+                        StringStruct('ProductName', 'Zip Picture Viewer'),
+                        StringStruct('ProductVersion', APP_VERSION),
+                    ],
+                )
+            ]
+        ),
+        VarFileInfo([VarStruct('Translation', [1033, 1200])]),
+    ],
+)
 
 a = Analysis(
     ['zippictureviewer_launcher.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[*DISTRIBUTION_METADATA, *RELEASE_METADATA_DATAS],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -60,13 +120,13 @@ a.binaries = [
     item
     for item in a.binaries
     if not (
-        'Qt/translations' in item[0].replace('\\', '/')
-        or 'Qt/plugins/tls' in item[0].replace('\\', '/')
-        or 'Qt/plugins/bearer' in item[0].replace('\\', '/')
-        or 'Qt/plugins/networkinformation' in item[0].replace('\\', '/')
-        or 'Qt/plugins/sqldrivers' in item[0].replace('\\', '/')
-        or 'Qt/plugins/qmltooling' in item[0].replace('\\', '/')
-        or 'Qt/plugins/printsupport' in item[0].replace('\\', '/')
+        'PySide6/translations' in item[0].replace('\\', '/')
+        or 'PySide6/plugins/tls' in item[0].replace('\\', '/')
+        or 'PySide6/plugins/bearer' in item[0].replace('\\', '/')
+        or 'PySide6/plugins/networkinformation' in item[0].replace('\\', '/')
+        or 'PySide6/plugins/sqldrivers' in item[0].replace('\\', '/')
+        or 'PySide6/plugins/qmltooling' in item[0].replace('\\', '/')
+        or 'PySide6/plugins/printsupport' in item[0].replace('\\', '/')
     )
 ]
 a.datas = [
@@ -93,6 +153,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='assets/ZipPictureViewer.ico',
+    version=VERSION_INFO,
 )
 coll = COLLECT(
     exe,

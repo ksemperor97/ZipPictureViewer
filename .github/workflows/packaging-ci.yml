@@ -1,0 +1,123 @@
+name: Packaging CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packaging-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-package:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints/packaging.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -c constraints/packaging.txt -e ".[dev]"
+
+      - name: Read project version
+        id: metadata
+        run: echo "version=$(python scripts/check_release_version.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest
+
+      - name: Record synthetic scan benchmark
+        run: python scripts/benchmark_scan.py --archives 1000 --images-per-archive 10 --output dist/scan-benchmark-macos.json
+
+      - name: Build and validate macOS app
+        run: scripts/build_macos_app.sh
+
+      - name: Locate macOS package
+        id: package
+        shell: bash
+        run: |
+          shopt -s nullglob
+          Archives=(dist/ZipPictureViewer-v${{ steps.metadata.outputs.version }}-mac-*-slim-adhoc.zip)
+          if (( ${#Archives[@]} != 1 )); then
+            echo "Expected one macOS archive, found ${#Archives[@]}" >&2
+            exit 1
+          fi
+          ArchiveName="$(basename "${Archives[0]}" .zip)"
+          echo "name=$ArchiveName" >> "$GITHUB_OUTPUT"
+          echo "path=${Archives[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload macOS package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            ${{ steps.package.outputs.path }}
+            ${{ steps.package.outputs.path }}.sha256
+            dist/scan-benchmark-macos.json
+          if-no-files-found: error
+
+  windows-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints/packaging.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -c constraints/packaging.txt -e ".[dev]"
+
+      - name: Read project version
+        id: metadata
+        shell: pwsh
+        run: |
+          $VersionOutput = & python scripts/check_release_version.py
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not determine the project version"
+          }
+          $Version = ([string]$VersionOutput).Trim()
+          "version=$Version" >> $env:GITHUB_OUTPUT
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest
+
+      - name: Record synthetic scan benchmark
+        run: python scripts/benchmark_scan.py --archives 1000 --images-per-archive 10 --output dist/scan-benchmark-windows.json
+
+      - name: Build and validate Windows app
+        shell: pwsh
+        run: scripts/build_windows_app.ps1
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZipPictureViewer-v${{ steps.metadata.outputs.version }}-windows-x64
+          path: |
+            dist/ZipPictureViewer-v${{ steps.metadata.outputs.version }}-windows-x64.zip
+            dist/ZipPictureViewer-v${{ steps.metadata.outputs.version }}-windows-x64.zip.sha256
+            dist/scan-benchmark-windows.json
+          if-no-files-found: error
