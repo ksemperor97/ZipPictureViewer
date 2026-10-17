@@ -11,6 +11,8 @@ from media import BLUE, RED, write_book
 VOLUMES = 200
 CHOSEN = 150
 SLOW_DRIVE = {"ZIP_PICTURE_VIEWER_SCAN_DELAY_MS": "20"}  # about 4 s per full scan
+# Slow CI machines take several times longer to finish the slowed scan.
+FULL_SCAN_TIMEOUT = 90
 
 
 def _big_library(root):
@@ -42,7 +44,7 @@ def test_dropped_archive_appears_before_the_scan_finishes(launch_app, tmp_path) 
         lambda s: _shown_while_scanning(s, _name(CHOSEN), "p1.png"),
         "chosen archive shown while scanning",
     )
-    state = app.wait_for_idle()
+    state = app.wait_for_idle(FULL_SCAN_TIMEOUT)
     assert state["entry_count"] == VOLUMES * 2
     assert state["archive"] == _name(CHOSEN) and state["member"] == "p1.png"
     assert state["status"] == f"{CHOSEN * 2 + 1} / {VOLUMES * 2}"
@@ -55,7 +57,7 @@ def test_relaunch_shows_the_saved_page_while_scanning(launch_app, tmp_path) -> N
     library = _big_library(tmp_path)
     app = launch_app()
     app.drop(library / _name(CHOSEN))
-    app.wait_for_idle()
+    app.wait_for_idle(FULL_SCAN_TIMEOUT)
     app.key("Right")
     app.wait_for_image(_name(CHOSEN), "p2.png")
     assert app.close() == 0
@@ -65,7 +67,7 @@ def test_relaunch_shows_the_saved_page_while_scanning(launch_app, tmp_path) -> N
         lambda s: _shown_while_scanning(s, _name(CHOSEN), "p2.png"),
         "saved page shown while scanning",
     )
-    state = relaunched.wait_for_idle()
+    state = relaunched.wait_for_idle(FULL_SCAN_TIMEOUT)
     assert state["member"] == "p2.png" and state["archive"] == _name(CHOSEN)
 
 
@@ -84,6 +86,6 @@ def test_neighbouring_archives_open_while_still_scanning(launch_app, tmp_path) -
     app.key("Right")
     app.wait_for(lambda s: _shown_while_scanning(s, _name(CHOSEN - 1), "p2.png"), "next page while scanning")
 
-    state = app.wait_for_idle()
+    state = app.wait_for_idle(FULL_SCAN_TIMEOUT)
     assert state["entry_count"] == VOLUMES * 2
     assert state["archive"] == _name(CHOSEN - 1)
