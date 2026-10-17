@@ -1,10 +1,9 @@
 """Launch the real viewer process and drive it through its automation channel.
 
-By default the app runs from source with the current interpreter. Set
-``ZPV_E2E_APP`` to a packaged executable (``.app/Contents/MacOS/...`` or
-``ZipPictureViewer.exe``) to run the same scenarios against a built bundle.
-The Qt platform is inherited, so windows appear on screen unless
-``QT_QPA_PLATFORM=offscreen`` is set (as CI does).
+By default the debug build from ``swift build`` is launched (the test session
+builds it first). Set ``ZPV_E2E_APP`` to a packaged executable
+(``dist/ZipPictureViewer.app/Contents/MacOS/ZipPictureViewer``) to run the
+same scenarios against a built bundle. Windows appear on screen.
 """
 
 from __future__ import annotations
@@ -13,11 +12,11 @@ import json
 import os
 import secrets
 import signal
+import socket
 import subprocess
 import sys
 import time
 from collections.abc import Callable
-from multiprocessing.connection import Client
 from pathlib import Path
 from typing import Any
 
@@ -64,7 +63,8 @@ class ViewerApp:
         with self.log_path.open("ab") as log:
             self.process = subprocess.Popen(command, env=env, stdout=log, stderr=log)
         port = self._wait_for_handshake(handshake)
-        self._connection = Client(("127.0.0.1", port), authkey=bytes.fromhex(key))
+        self._connection = _JsonLines(socket.create_connection(("127.0.0.1", port), timeout=30))
+        self._connection.send({"auth": key})
         self._ensure_active()
         return self
 
@@ -123,8 +123,16 @@ class ViewerApp:
         return result["accepted"]
 
     def click(self, button: str) -> None:
-        # Moving the mouse reveals the auto-hiding controls, as for a user.
+        # Like a user: focus the window, move the mouse to reveal the
+        # auto-hiding controls, and wait until the button can be clicked.
+        self._ensure_active()
         self.call("move_mouse", x=0.5, y=0.5)
+        deadline = time.monotonic() + DEFAULT_TIMEOUT
+        while not self.call("clickable", button=button):
+            if time.monotonic() > deadline:
+                raise AssertionError(f"{button} never became clickable.\n{self.log_tail()}")
+            time.sleep(0.05)
+            self.call("move_mouse", x=0.5, y=0.5)
         self.call("click", button=button)
 
     def pixel(self, x: float = 0.5, y: float = 0.5) -> str:
@@ -178,6 +186,27 @@ class ViewerApp:
             self._connection = None
 
 
+class _JsonLines:
+    """One JSON object per line, as the app's automation server speaks."""
+
+    def __init__(self, connection: socket.socket) -> None:
+        self._socket = connection
+        self._reader = connection.makefile("rb")
+
+    def send(self, message: dict) -> None:
+        self._socket.sendall(json.dumps(message).encode() + b"\n")
+
+    def recv(self) -> dict:
+        line = self._reader.readline()
+        if not line:
+            raise EOFError("automation channel closed")
+        return json.loads(line)
+
+    def close(self) -> None:
+        self._reader.close()
+        self._socket.close()
+
+
 def packaged_macos_bundle() -> Path | None:
     """Return the ``.app`` directory when testing a packaged macOS build."""
 
@@ -205,8 +234,9 @@ def _launch_services_command(
     return [*command, *map(str, files), "--args", *app_arguments]
 
 
+DEBUG_BINARY = Path(__file__).resolve().parents[1] / ".build" / "debug" / "ZipPictureViewer"
+
+
 def app_command() -> list[str]:
     packaged = os.environ.get("ZPV_E2E_APP")
-    if packaged:
-        return [packaged]
-    return [sys.executable, "-m", "zippictureviewer"]
+    return [packaged] if packaged else [str(DEBUG_BINARY)]
