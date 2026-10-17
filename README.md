@@ -91,8 +91,7 @@ floating 메뉴는 기본적으로 `폴더 열기`, `이전`, `다음`, `닫기`
 
 ## 소스에서 실행
 
-Python 3.10 이상이 필요합니다. 개발 및 패키징 기준은 Python 3.12입니다.
-macOS에서는 최소 OS 계약을 검증한 PySide6 6.8.3을 프로젝트 의존성으로 고정합니다.
+Python 3.12가 필요합니다. PySide6는 6.8.3 이상 6.12 미만을 지원합니다. 배포 빌드는 macOS 13 최소 OS 계약을 검증한 PySide6 6.8.3을 `constraints/packaging.txt`로 고정하고, 개발은 공용 워크스페이스 환경의 PySide6 6.11을 사용합니다.
 
 ```bash
 python3.12 -m venv .venv
