@@ -21,6 +21,8 @@ class ViewerShortcutManager(QObject):
         super().__init__(window)
         self._navigation_shortcuts: list[QShortcut] = []
         self._space_shortcut: QShortcut | None = None
+        self._all_shortcuts: list[QShortcut] = []
+        self._enabled = True
 
         image_bindings = (
             (Qt.Key.Key_Left, window.show_previous_image),
@@ -54,12 +56,22 @@ class ViewerShortcutManager(QObject):
             ("?", window.show_shortcut_help),
             (Qt.Key.Key_Escape, window.exit_fullscreen),
         ):
-            self._window_shortcut(window, sequence, callback)
+            self._all_shortcuts.append(self._window_shortcut(window, sequence, callback))
+        self._all_shortcuts += [*self._navigation_shortcuts, self._space_shortcut]
 
         app = QApplication.instance()
         if app is not None:
             app.focusChanged.connect(self._sync_focus)
             self._sync_focus(None, app.focusWidget())
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Turn every viewer shortcut on or off, e.g. while the window closes."""
+
+        self._enabled = enabled
+        for shortcut in self._all_shortcuts:
+            shortcut.setEnabled(enabled)
+        if enabled:
+            self._sync_focus(None, QApplication.instance().focusWidget())
 
     @staticmethod
     def _window_shortcut(window, sequence, callback) -> QShortcut:
@@ -69,6 +81,8 @@ class ViewerShortcutManager(QObject):
 
     @Slot(QWidget, QWidget)
     def _sync_focus(self, _previous: QWidget | None, current: QWidget | None) -> None:
+        if not self._enabled:
+            return
         editing = _is_input_widget(current)
         for shortcut in self._navigation_shortcuts:
             shortcut.setEnabled(not editing)
