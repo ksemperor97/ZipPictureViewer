@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .folder_context import ARCHIVE_EXTENSIONS, FolderContext
+from .folder_context import FolderContext
+from .formats import ARCHIVE_EXTENSIONS
 from .natural_sort import natural_sorted
 
 

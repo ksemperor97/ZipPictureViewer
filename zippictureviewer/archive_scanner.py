@@ -11,6 +11,7 @@ from .archive_metadata import (
     ScanOptions,
     read_archive_infos,
 )
+from .formats import ARCHIVE_EXTENSIONS, IMAGE_EXTENSIONS
 from .models import (
     ArchiveMemberId,
     ContainerRevision,
@@ -21,8 +22,6 @@ from .models import (
 from .natural_sort import natural_sorted
 
 
-ARCHIVE_EXTENSIONS = {".cbz", ".zip"}
-IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 CancelCheck = Callable[[], bool]
 ProgressCallback = Callable[[Path, int], None]
 

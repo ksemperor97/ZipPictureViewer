@@ -5,9 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from .formats import ARCHIVE_EXTENSIONS
+
 
 SourceKind = Literal["folder", "archive"]
-ARCHIVE_EXTENSIONS = frozenset({".cbz", ".zip"})
 
 
 @dataclass(frozen=True)
